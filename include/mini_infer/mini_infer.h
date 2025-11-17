@@ -17,6 +17,8 @@
 // Operators
 #include "mini_infer/operators/operator.h"
 #include "mini_infer/operators/conv2d.h"
+#include "mini_infer/operators/relu.h"
+#include "mini_infer/operators/linear.h"
 
 // Graph
 #include "mini_infer/graph/node.h"

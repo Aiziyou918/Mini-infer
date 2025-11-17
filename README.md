@@ -167,6 +167,88 @@ engine.forward(inputs, outputs);
 
 ## 架构设计
 
+### 组件架构图
+
+```mermaid
+graph TB
+    %% 用户层
+    User[用户 User]
+    
+    %% Runtime 层
+    Runtime[Runtime 运行时<br/>Engine, EngineConfig]
+    
+    %% 中间层组件
+    Graph[Graph 计算图<br/>Node, Graph]
+    Backends[Backends 后端<br/>Backend, CPUBackend]
+    Operators[Operators 算子<br/>Operator, OpFactory]
+    
+    %% 核心层
+    Core[Core 核心<br/>Tensor, Shape, DataType, Types, Allocator]
+    
+    %% 工具层
+    Utils[Utils 工具<br/>Logger]
+    
+    %% 依赖关系
+    User --> Runtime
+    Runtime --> Graph
+    Runtime --> Backends
+    Runtime --> Operators
+    Runtime --> Utils
+    
+    Graph --> Operators
+    Graph --> Core
+    
+    Operators --> Backends
+    Operators --> Core
+    
+    Backends --> Core
+    
+    %% 样式定义
+    classDef userStyle fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef runtimeStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef componentStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef coreStyle fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef utilStyle fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    
+    class User userStyle
+    class Runtime runtimeStyle
+    class Graph,Backends,Operators componentStyle
+    class Core coreStyle
+    class Utils utilStyle
+```
+
+### 模块依赖关系
+
+```mermaid
+graph LR
+    Runtime[Runtime<br/>运行时模块]
+    Graph[Graph<br/>图模块]
+    Operators[Operators<br/>算子模块]
+    Backends[Backends<br/>后端模块]
+    Core[Core<br/>核心模块]
+    Utils[Utils<br/>工具模块]
+    
+    Runtime -->|依赖| Graph
+    Runtime -->|依赖| Backends
+    Runtime -->|依赖| Operators
+    Runtime -->|依赖| Utils
+    
+    Graph -->|依赖| Operators
+    Graph -->|依赖| Core
+    
+    Operators -->|依赖| Backends
+    Operators -->|依赖| Core
+    
+    Backends -->|依赖| Core
+    
+    style Runtime fill:#ffccbc,stroke:#bf360c
+    style Graph fill:#c5cae9,stroke:#283593
+    style Operators fill:#b2dfdb,stroke:#004d40
+    style Backends fill:#d1c4e9,stroke:#4527a0
+    style Core fill:#a5d6a7,stroke:#1b5e20
+    style Utils fill:#fff9c4,stroke:#f57f17
+```
+
 ### 核心模块
 
 - **Core**: 提供基础数据结构（Tensor, Shape, Allocator）
@@ -175,6 +257,8 @@ engine.forward(inputs, outputs);
 - **Graph**: 计算图的表示和优化
 - **Runtime**: 推理引擎，负责执行计算图
 - **Utils**: 日志、性能分析等工具
+
+> 💡 **更多架构细节**: 查看 [完整组件图文档](docs/COMPONENT_DIAGRAM.md) 了解详细的组件交互、数据流和扩展点
 
 ## 开发路线
 

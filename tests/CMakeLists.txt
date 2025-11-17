@@ -1,10 +1,12 @@
-# Tests
+# Tests using Google Test
 
-# 简单的测试框架（可以后续改用 Google Test）
 set(TEST_SOURCES
     test_tensor.cpp
     test_backend.cpp
     test_graph.cpp
+    test_operators.cpp
+    test_linear.cpp
+    test_conv2d.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})
@@ -20,8 +22,11 @@ foreach(test_src ${TEST_SOURCES})
             mini_infer_graph
             mini_infer_runtime
             mini_infer_utils
+            GTest::gtest_main
     )
     
-    add_test(NAME ${test_name} COMMAND ${test_name})
+    # Discover tests automatically with increased timeout
+    include(GoogleTest)
+    gtest_discover_tests(${test_name})
 endforeach()
 

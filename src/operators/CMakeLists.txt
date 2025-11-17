@@ -2,6 +2,8 @@
 set(OPERATORS_SOURCES
     operator.cpp
     conv2d.cpp
+    relu.cpp
+    linear.cpp
 )
 
 add_library(mini_infer_operators ${OPERATORS_SOURCES})

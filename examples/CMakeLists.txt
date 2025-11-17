@@ -3,6 +3,9 @@
 set(EXAMPLE_SOURCES
     simple_inference.cpp
     build_graph.cpp
+    relu_example.cpp
+    linear_example.cpp
+    conv2d_example.cpp
 )
 
 foreach(example_src ${EXAMPLE_SOURCES})
