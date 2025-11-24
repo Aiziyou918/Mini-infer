@@ -19,6 +19,7 @@
 #include "mini_infer/operators/conv2d.h"
 #include "mini_infer/operators/relu.h"
 #include "mini_infer/operators/linear.h"
+#include "mini_infer/operators/pooling.h"
 
 // Graph
 #include "mini_infer/graph/node.h"
@@ -26,6 +27,11 @@
 
 // Runtime
 #include "mini_infer/runtime/engine.h"
+
+// Kernels
+#include "mini_infer/kernels/kernel_types.h"
+#include "mini_infer/kernels/gemm.h"
+#include "mini_infer/kernels/im2col.h"
 
 // Utils
 #include "mini_infer/utils/logger.h"

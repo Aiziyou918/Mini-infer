@@ -82,31 +82,6 @@ public:
 
 private:
     LinearParam param_;
-    
-    /**
-     * @brief Perform matrix multiplication: output = input @ weight^T
-     * Optimized implementation similar to TensorRT's GEMM
-     */
-    template<typename T>
-    void matrix_multiply(
-        const T* input,      // [batch_size, in_features]
-        const T* weight,     // [out_features, in_features]
-        T* output,           // [batch_size, out_features]
-        int batch_size,
-        int in_features,
-        int out_features
-    );
-    
-    /**
-     * @brief Add bias to output
-     */
-    template<typename T>
-    void add_bias(
-        T* output,           // [batch_size, out_features]
-        const T* bias,       // [out_features]
-        int batch_size,
-        int out_features
-    );
 };
 
 } // namespace operators

@@ -1,0 +1,37 @@
+# Mini-Infer Python Dependencies
+# =================================
+# This file contains Python dependencies for training models
+# and exporting them to formats compatible with Mini-Infer
+
+# Deep Learning Framework
+# -----------------------
+torch>=2.0.0,<3.0.0          # PyTorch for model training and export
+torchvision>=0.15.0          # Computer vision datasets and transforms
+
+# ONNX Support
+# ------------
+onnx>=1.14.0                 # ONNX model format
+onnxruntime>=1.15.0          # ONNX Runtime for model verification
+onnx-simplifier>=0.4.33      # Simplify ONNX models (optional)
+
+# Scientific Computing
+# --------------------
+numpy>=1.24.0,<2.0.0         # Numerical operations
+scipy>=1.10.0                # Scientific computing utilities
+
+# Visualization (Optional)
+# -------------------------
+matplotlib>=3.7.0            # Plotting and visualization
+tensorboard>=2.13.0          # TensorBoard logging (optional)
+
+# Development Tools (Optional)
+# -----------------------------
+pytest>=7.3.0                # Unit testing
+black>=23.0.0                # Code formatting
+flake8>=6.0.0                # Linting
+
+# Note: Install with:
+#   pip install -r requirements.txt
+#
+# For development:
+#   pip install -r requirements.txt --upgrade

@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <memory>
+#include <unordered_map>
+#include <mutex>
 
 namespace mini_infer {
 namespace core {
@@ -53,10 +55,22 @@ public:
     void deallocate(void* ptr) override;
 
     /**
-     * @brief Get the total amount of memory allocated on the CPU
-     * @return The total amount of memory allocated on the CPU
+     * @brief Get the total amount of memory currently allocated
+     * @return The total amount of memory currently allocated in bytes
      */
-    size_t total_allocated() const override { return total_allocated_; }
+    size_t total_allocated() const override;
+    
+    /**
+     * @brief Get the peak memory usage
+     * @return The peak memory usage in bytes
+     */
+    size_t peak_allocated() const { return peak_allocated_; }
+    
+    /**
+     * @brief Get the number of active allocations
+     * @return The number of active allocations
+     */
+    size_t allocation_count() const;
     
     /**
      * @brief Get the instance of the CPUAllocator
@@ -66,7 +80,11 @@ public:
     
 private:
     CPUAllocator() = default;
-    size_t total_allocated_{0};
+    
+    mutable std::mutex mutex_;                       ///< Mutex for thread safety
+    std::unordered_map<void*, size_t> allocations_;  ///< Track allocation sizes
+    size_t total_allocated_{0};                      ///< Current total allocated
+    size_t peak_allocated_{0};                       ///< Peak memory usage
 };
 
 /**

@@ -6,6 +6,8 @@ set(EXAMPLE_SOURCES
     relu_example.cpp
     linear_example.cpp
     conv2d_example.cpp
+    pooling_example.cpp
+    lenet5_inference.cpp
 )
 
 foreach(example_src ${EXAMPLE_SOURCES})

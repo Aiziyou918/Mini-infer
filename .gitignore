@@ -81,3 +81,19 @@ docs/_build/
 docs/html/
 docs/latex/
 
+# Data
+data/
+
+# Models
+checkpoints/
+/models/python/*/models
+weights/
+
+# Environment
+.conda/
+
+# Third-party
+third-party/
+
+# Test samples
+test_samples/

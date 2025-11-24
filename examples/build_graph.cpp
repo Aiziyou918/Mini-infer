@@ -34,9 +34,9 @@ int main() {
     MI_LOG_INFO("Validating graph...");
     auto status = graph->validate();
     if (status == core::Status::SUCCESS) {
-        std::cout << "✓ Graph is valid" << std::endl;
+        std::cout << "[SUCCESS] Graph is valid" << std::endl;
     } else {
-        std::cout << "✗ Graph validation failed" << std::endl;
+        std::cout << "[FAILED] Graph validation failed" << std::endl;
         return 1;
     }
     

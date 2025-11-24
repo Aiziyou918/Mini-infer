@@ -4,6 +4,7 @@ set(OPERATORS_SOURCES
     conv2d.cpp
     relu.cpp
     linear.cpp
+    pooling.cpp
 )
 
 add_library(mini_infer_operators ${OPERATORS_SOURCES})
@@ -17,6 +18,7 @@ target_include_directories(mini_infer_operators
 target_link_libraries(mini_infer_operators
     PUBLIC
         mini_infer_core
+        mini_infer_kernels
         mini_infer_backends
 )
 

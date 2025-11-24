@@ -91,6 +91,6 @@ int main() {
         std::cout << "]" << std::endl;
     }
     
-    std::cout << "\n✓ ReLU example completed successfully!" << std::endl;
+    std::cout << "\n[SUCCESS] ReLU example completed successfully!" << std::endl;
     return 0;
 }

@@ -1,4 +1,8 @@
 #include "mini_infer/operators/conv2d.h"
+#include "mini_infer/kernels/gemm.h"
+#include "mini_infer/kernels/im2col.h"
+#include "mini_infer/kernels/bias.h"
+#include "mini_infer/core/buffer.h"
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -57,6 +61,10 @@ core::Status Conv2D::forward(
     int kernel_w = static_cast<int>(weight_shape[3]);
     
     // Validate parameters
+    // TODO: Groups convolution not yet implemented, only groups=1 supported
+    if (param_.groups != 1) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
     if (C_in != C_in_per_group * param_.groups) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
@@ -89,17 +97,26 @@ core::Status Conv2D::forward(
         const float* weight_data = static_cast<const float*>(weight->data());
         float* output_data = static_cast<float*>(output->data());
         
-        // Allocate col_buffer for im2col
-        int col_buffer_size = C_in * kernel_h * kernel_w * H_out * W_out;
-        std::vector<float> col_buffer(col_buffer_size);
+        // CPU-optimized: Per-batch GEMM for better cache utilization
+        // Directly produces NCHW layout without transpose overhead
+        int spatial_size = H_out * W_out;
+        int col_size_per_batch = C_in * kernel_h * kernel_w * spatial_size;
         
-        // Process each batch
+        // Allocate col_buffer for single batch (better cache locality)
+        core::Buffer<float> col_buffer(col_size_per_batch);
+        
+        // GEMM parameters
+        int M = C_out;
+        int N_gemm = spatial_size;
+        int K = C_in * kernel_h * kernel_w;
+        
+        // Process each batch separately
         for (int n = 0; n < N; ++n) {
             const float* input_n = input_data + n * C_in * H_in * W_in;
-            float* output_n = output_data + n * C_out * H_out * W_out;
+            float* output_n = output_data + n * C_out * spatial_size;
             
-            // im2col transformation
-            im2col<float>(
+            // Step 1: im2col for this batch
+            kernels::Im2ColKernel::im2col<float>(
                 input_n,
                 col_buffer.data(),
                 C_in, H_in, W_in,
@@ -110,15 +127,11 @@ core::Status Conv2D::forward(
                 H_out, W_out
             );
             
-            // GEMM: output = weight @ col_buffer
-            // weight: [C_out, C_in*kh*kw]
-            // col_buffer: [C_in*kh*kw, H_out*W_out]
-            // output: [C_out, H_out*W_out]
-            int M = C_out;
-            int N_gemm = H_out * W_out;
-            int K = C_in * kernel_h * kernel_w;
-            
-            gemm_nn<float>(
+            // Step 2: GEMM for this batch
+            // weight: [C_out, K]
+            // col_buffer: [K, spatial_size]
+            // output_n: [C_out, spatial_size] (NCHW layout, naturally)
+            kernels::GEMMKernel::gemm_nn<float>(
                 weight_data,
                 col_buffer.data(),
                 output_n,
@@ -129,10 +142,13 @@ core::Status Conv2D::forward(
         // Add bias if needed
         if (param_.use_bias) {
             const float* bias_data = static_cast<const float*>(inputs[2]->data());
-            for (int n = 0; n < N; ++n) {
-                float* output_n = output_data + n * C_out * H_out * W_out;
-                add_bias<float>(output_n, bias_data, C_out, H_out, W_out);
-            }
+            kernels::BiasKernel::add_channel_bias<float>(
+                output_data,
+                bias_data,
+                N,           // batch_size
+                C_out,       // channels
+                H_out * W_out  // spatial_size
+            );
         }
         
     } else {
@@ -176,6 +192,10 @@ core::Status Conv2D::infer_shape(
     int64_t kernel_w = weight_shape[3];
     
     // Validate channel dimensions
+    // TODO: Groups convolution not yet implemented, only groups=1 supported
+    if (param_.groups != 1) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
     if (C_in != C_in_per_group * param_.groups) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
@@ -200,116 +220,6 @@ core::Status Conv2D::infer_shape(
     return core::Status::SUCCESS;
 }
 
-// im2col implementation for convolution
-// Reference: Caffe's im2col
-template<typename T>
-void Conv2D::im2col(
-    const T* input,
-    T* col_buffer,
-    int channels,
-    int height,
-    int width,
-    int kernel_h,
-    int kernel_w,
-    int stride_h,
-    int stride_w,
-    int padding_h,
-    int padding_w,
-    int dilation_h,
-    int dilation_w,
-    int out_height,
-    int out_width) {
-    
-    int channel_size = height * width;
-    
-    for (int c = 0; c < channels; ++c) {
-        for (int kh = 0; kh < kernel_h; ++kh) {
-            for (int kw = 0; kw < kernel_w; ++kw) {
-                // Calculate input row and column
-                int input_row_start = -padding_h + kh * dilation_h;
-                int input_col_start = -padding_w + kw * dilation_w;
-                
-                // Column index
-                int col_idx = (c * kernel_h * kernel_w + kh * kernel_w + kw);
-                
-                for (int oh = 0; oh < out_height; ++oh) {
-                    for (int ow = 0; ow < out_width; ++ow) {
-                        // Calculate corresponding input position
-                        int input_row = input_row_start + oh * stride_h;
-                        int input_col = input_col_start + ow * stride_w;
-                        
-                        int col_buffer_idx = col_idx * out_height * out_width + oh * out_width + ow;
-                        
-                        // Check if position is within valid input bounds
-                        if (input_row >= 0 && input_row < height &&
-                            input_col >= 0 && input_col < width) {
-                            int input_idx = c * channel_size + input_row * width + input_col;
-                            col_buffer[col_buffer_idx] = input[input_idx];
-                        } else {
-                            // Padding area
-                            col_buffer[col_buffer_idx] = T(0);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// GEMM implementation: C = A @ B
-// A: [M, K], B: [K, N], C: [M, N]
-template<typename T>
-void Conv2D::gemm_nn(
-    const T* A,
-    const T* B,
-    T* C,
-    int M,
-    int N,
-    int K) {
-    
-    // Initialize C to zero
-    std::memset(C, 0, sizeof(T) * M * N);
-    
-    // Naive GEMM implementation
-    for (int m = 0; m < M; ++m) {
-        for (int k = 0; k < K; ++k) {
-            T a_val = A[m * K + k];
-            const T* b_row = B + k * N;
-            T* c_row = C + m * N;
-            
-            // Vectorizable loop
-            for (int n = 0; n < N; ++n) {
-                c_row[n] += a_val * b_row[n];
-            }
-        }
-    }
-}
-
-// Add bias to output
-template<typename T>
-void Conv2D::add_bias(
-    T* output,
-    const T* bias,
-    int channels,
-    int height,
-    int width) {
-    
-    int spatial_size = height * width;
-    
-    for (int c = 0; c < channels; ++c) {
-        T bias_val = bias[c];
-        T* output_channel = output + c * spatial_size;
-        
-        for (int i = 0; i < spatial_size; ++i) {
-            output_channel[i] += bias_val;
-        }
-    }
-}
-
-// Explicit template instantiation
-template void Conv2D::im2col<float>(const float*, float*, int, int, int, int, int, int, int, int, int, int, int, int, int);
-template void Conv2D::gemm_nn<float>(const float*, const float*, float*, int, int, int);
-template void Conv2D::add_bias<float>(float*, const float*, int, int, int);
 
 // Register Conv2D operator
 REGISTER_OPERATOR(Conv2D, Conv2D);

@@ -108,54 +108,6 @@ public:
 
 private:
     Conv2DParam param_;
-    
-    /**
-     * @brief im2col transformation for convolution
-     * Transforms input tensor to column matrix for GEMM
-     */
-    template<typename T>
-    void im2col(
-        const T* input,        // [C_in, H_in, W_in]
-        T* col_buffer,         // [C_in*kh*kw, H_out*W_out]
-        int channels,
-        int height,
-        int width,
-        int kernel_h,
-        int kernel_w,
-        int stride_h,
-        int stride_w,
-        int padding_h,
-        int padding_w,
-        int dilation_h,
-        int dilation_w,
-        int out_height,
-        int out_width
-    );
-    
-    /**
-     * @brief GEMM for convolution: output = weight @ col_buffer
-     */
-    template<typename T>
-    void gemm_nn(
-        const T* A,            // [M, K]
-        const T* B,            // [K, N]
-        T* C,                  // [M, N]
-        int M,
-        int N,
-        int K
-    );
-    
-    /**
-     * @brief Add bias to output
-     */
-    template<typename T>
-    void add_bias(
-        T* output,             // [C_out, H_out, W_out]
-        const T* bias,         // [C_out]
-        int channels,
-        int height,
-        int width
-    );
 };
 
 } // namespace operators

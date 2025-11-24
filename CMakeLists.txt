@@ -125,6 +125,9 @@ endif()
 # Core library
 add_subdirectory(src/core)
 
+# Kernels (computational kernels for CPU/GPU)
+add_subdirectory(src/kernels)
+
 # Backend implementations
 add_subdirectory(src/backends)
 

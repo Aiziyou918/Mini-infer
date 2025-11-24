@@ -1,4 +1,6 @@
 #include "mini_infer/operators/linear.h"
+#include "mini_infer/kernels/gemm.h"
+#include "mini_infer/kernels/bias.h"
 #include <algorithm>
 #include <cstring>
 
@@ -89,13 +91,25 @@ core::Status Linear::forward(
         float* output_data = static_cast<float*>(output->data());
         
         // Matrix multiplication: output = input @ weight^T
-        matrix_multiply(input_data, weight_data, output_data,
-                       batch_size, in_features, out_features);
+        kernels::GEMMKernel::gemm_nt<float>(
+            input_data,      // [batch_size, in_features]
+            weight_data,     // [out_features, in_features]
+            output_data,     // [batch_size, out_features]
+            batch_size,
+            out_features,
+            in_features
+        );
         
         // Add bias if needed
         if (param_.use_bias) {
             const float* bias_data = static_cast<const float*>(inputs[2]->data());
-            add_bias(output_data, bias_data, batch_size, out_features);
+            kernels::BiasKernel::add_channel_bias<float>(
+                output_data,
+                bias_data,
+                batch_size,     // batch_size
+                out_features,   // channels
+                1               // spatial_size (1 for Linear)
+            );
         }
         
     } else if (dtype == core::DataType::INT32) {
@@ -103,14 +117,26 @@ core::Status Linear::forward(
         const int32_t* weight_data = static_cast<const int32_t*>(weight->data());
         int32_t* output_data = static_cast<int32_t*>(output->data());
         
-        // Matrix multiplication
-        matrix_multiply(input_data, weight_data, output_data,
-                       batch_size, in_features, out_features);
+        // Matrix multiplication: output = input @ weight^T
+        kernels::GEMMKernel::gemm_nt<int32_t>(
+            input_data,      // [batch_size, in_features]
+            weight_data,     // [out_features, in_features]
+            output_data,     // [batch_size, out_features]
+            batch_size,
+            out_features,
+            in_features
+        );
         
         // Add bias if needed
         if (param_.use_bias) {
             const int32_t* bias_data = static_cast<const int32_t*>(inputs[2]->data());
-            add_bias(output_data, bias_data, batch_size, out_features);
+            kernels::BiasKernel::add_channel_bias<int32_t>(
+                output_data,
+                bias_data,
+                batch_size,     // batch_size
+                out_features,   // channels
+                1               // spatial_size (1 for Linear)
+            );
         }
         
     } else {
@@ -179,69 +205,6 @@ core::Status Linear::infer_shape(
     return core::Status::SUCCESS;
 }
 
-// Optimized matrix multiplication: output = input @ weight^T
-// Similar to TensorRT's GEMM implementation
-template<typename T>
-void Linear::matrix_multiply(
-    const T* input,      // [batch_size, in_features]
-    const T* weight,     // [out_features, in_features]
-    T* output,           // [batch_size, out_features]
-    int batch_size,
-    int in_features,
-    int out_features) {
-    
-    // For each batch
-    for (int b = 0; b < batch_size; ++b) {
-        const T* input_row = input + b * in_features;
-        T* output_row = output + b * out_features;
-        
-        // For each output feature
-        for (int o = 0; o < out_features; ++o) {
-            const T* weight_row = weight + o * in_features;
-            T sum = 0;
-            
-            // Dot product with loop unrolling for better performance
-            int i = 0;
-            
-            // Process 4 elements at a time (similar to TensorRT's vectorization)
-            for (; i + 3 < in_features; i += 4) {
-                sum += input_row[i]     * weight_row[i];
-                sum += input_row[i + 1] * weight_row[i + 1];
-                sum += input_row[i + 2] * weight_row[i + 2];
-                sum += input_row[i + 3] * weight_row[i + 3];
-            }
-            
-            // Process remaining elements
-            for (; i < in_features; ++i) {
-                sum += input_row[i] * weight_row[i];
-            }
-            
-            output_row[o] = sum;
-        }
-    }
-}
-
-// Add bias to output
-template<typename T>
-void Linear::add_bias(
-    T* output,           // [batch_size, out_features]
-    const T* bias,       // [out_features]
-    int batch_size,
-    int out_features) {
-    
-    for (int b = 0; b < batch_size; ++b) {
-        T* output_row = output + b * out_features;
-        for (int o = 0; o < out_features; ++o) {
-            output_row[o] += bias[o];
-        }
-    }
-}
-
-// Explicit template instantiation for common types
-template void Linear::matrix_multiply<float>(const float*, const float*, float*, int, int, int);
-template void Linear::matrix_multiply<int32_t>(const int32_t*, const int32_t*, int32_t*, int, int, int);
-template void Linear::add_bias<float>(float*, const float*, int, int);
-template void Linear::add_bias<int32_t>(int32_t*, const int32_t*, int, int);
 
 // Register Linear operator
 REGISTER_OPERATOR(Linear, Linear);
