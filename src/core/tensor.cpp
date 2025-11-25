@@ -47,6 +47,7 @@ size_t Tensor::element_size() const {
         case DataType::FLOAT32: return sizeof(float);
         case DataType::FLOAT16: return 2;
         case DataType::INT32: return sizeof(int32_t);
+        case DataType::INT64: return sizeof(int64_t);
         case DataType::INT8: return sizeof(int8_t);
         case DataType::UINT8: return sizeof(uint8_t);
         case DataType::BOOL: return sizeof(bool);

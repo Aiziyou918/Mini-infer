@@ -37,17 +37,55 @@ Mini-Infer/
 
 ## 构建要求
 
+### 基础依赖
+
 - CMake 3.18+
 - C++17 编译器
   - MSVC 2017+ (Windows)
   - GCC 7+ (Linux)
   - Clang 5+ (macOS)
 
+### 可选依赖
+
+#### ONNX 模型导入支持
+
+如果需要启用 ONNX 模型导入功能，需要安装 Protobuf：
+
+**Windows (推荐使用 vcpkg):**
+```powershell
+# 1. 安装 vcpkg
+git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+cd C:\vcpkg
+.\bootstrap-vcpkg.bat
+
+# 2. 安装 protobuf
+.\vcpkg install protobuf:x64-windows
+
+# 3. 配置环境变量 (可选)
+# 将 C:\vcpkg\installed\x64-windows\bin 添加到 PATH
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install -y libprotobuf-dev protobuf-compiler
+```
+
+**Linux (CentOS/RHEL):**
+```bash
+sudo yum install -y protobuf-devel protobuf-compiler
+```
+
+**macOS:**
+```bash
+brew install protobuf
+```
+
 ## 快速开始
 
 ### 构建项目
 
-#### Windows (MSVC)
+#### Windows (基础构建)
 
 ```powershell
 mkdir build
@@ -56,7 +94,25 @@ cmake ..
 cmake --build . --config Release
 ```
 
-#### Linux/macOS
+#### Windows (使用 vcpkg + ONNX 支持)
+
+```powershell
+# 方法 1: 使用 CMake 预设 (推荐) - 全自动配置
+cmake --preset windows-vcpkg-release
+cmake --build --preset windows-vcpkg-release
+
+# 方法 2: 手动指定工具链 - 全自动配置
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DMINI_INFER_ENABLE_ONNX=ON
+cmake --build build --config Release
+```
+
+**🚀 自动化特性:**
+- ✅ 自动下载 ONNX proto 文件
+- ✅ 自动检测 protoc 版本兼容性
+- ✅ 自动生成 C++ 代码
+- ✅ 无需手动运行脚本
+
+#### Linux/macOS (基础构建)
 
 ```bash
 mkdir build
@@ -65,9 +121,67 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
 
+#### Linux/macOS (ONNX 支持)
+
+```bash
+# 方法 1: 使用 CMake 预设 (推荐) - 全自动配置
+cmake --preset linux-onnx-release
+cmake --build --preset linux-onnx-release
+
+# 方法 2: 手动配置 - 全自动配置
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DMINI_INFER_ENABLE_ONNX=ON ..
+make -j$(nproc)
+```
+
+**🚀 自动化特性:**
+- ✅ 自动下载 ONNX proto 文件
+- ✅ 自动检测 protoc 版本兼容性
+- ✅ 自动生成 C++ 代码
+- ✅ 无需手动运行脚本
+
+### CMake 预设
+
+项目提供了多个 CMake 预设，简化配置过程：
+
+#### 可用预设
+
+**Windows:**
+- `windows-debug` - 基础 Debug 构建
+- `windows-release` - 基础 Release 构建
+- `windows-vcpkg-debug` - 使用 vcpkg + ONNX 的 Debug 构建
+- `windows-vcpkg-release` - 使用 vcpkg + ONNX 的 Release 构建
+
+**Linux:**
+- `linux-debug` - 基础 Debug 构建
+- `linux-release` - 基础 Release 构建
+- `linux-onnx-debug` - 启用 ONNX 的 Debug 构建
+- `linux-onnx-release` - 启用 ONNX 的 Release 构建
+
+#### 使用预设
+
+```bash
+# 查看可用预设
+cmake --list-presets
+
+# 配置项目
+cmake --preset <preset-name>
+
+# 构建项目
+cmake --build --preset <preset-name>
+
+# 运行测试
+ctest --preset <preset-name>
+```
+
 ### 运行测试
 
 ```bash
+# 使用预设运行测试
+ctest --preset windows-vcpkg-release
+
+# 或传统方式
 cd build
 ctest --output-on-failure
 ```
@@ -94,9 +208,17 @@ cmake .. \
   -DMINI_INFER_BUILD_EXAMPLES=ON \     # 构建示例（默认 ON）
   -DMINI_INFER_BUILD_SHARED_LIBS=ON \  # 构建动态库（默认 ON）
   -DMINI_INFER_ENABLE_CUDA=OFF \       # 启用 CUDA（默认 OFF，未来支持）
+  -DMINI_INFER_ENABLE_ONNX=ON \        # 启用 ONNX 模型导入（默认 ON）
   -DMINI_INFER_ENABLE_PROFILING=ON \   # 启用性能分析（默认 ON）
   -DMINI_INFER_ENABLE_LOGGING=ON       # 启用日志（默认 ON）
 ```
+
+### ONNX 相关选项
+
+- **`MINI_INFER_ENABLE_ONNX=ON`**: 启用 ONNX 模型导入支持
+  - 需要先安装 Protobuf 依赖
+  - Windows 推荐使用 vcpkg 安装
+  - 如果 Protobuf 未找到，会自动禁用 ONNX 支持并显示警告
 
 ## 使用示例
 
@@ -138,6 +260,51 @@ graph->connect("conv1", "output");
 graph->set_inputs({"input"});
 graph->set_outputs({"output"});
 ```
+
+### ONNX 模型导入
+
+```cpp
+#include "mini_infer/importers/onnx_parser.h"
+#include "mini_infer/runtime/runtime.h"
+
+using namespace mini_infer;
+
+int main() {
+    // 1. 解析 ONNX 模型
+    importers::OnnxParser parser;
+    parser.set_verbose(true);  // 启用详细日志
+    
+    auto graph = parser.parse("model.onnx");
+    if (!graph) {
+        std::cerr << "Failed to parse ONNX model: " 
+                  << parser.get_error() << std::endl;
+        return 1;
+    }
+    
+    // 2. 创建运行时
+    runtime::Runtime runtime;
+    if (!runtime.load_graph(std::move(graph))) {
+        std::cerr << "Failed to load graph" << std::endl;
+        return 1;
+    }
+    
+    // 3. 准备输入数据
+    std::vector<float> input_data(1 * 3 * 224 * 224);
+    // ... 填充输入数据 ...
+    
+    // 4. 执行推理
+    auto outputs = runtime.forward({input_data});
+    
+    // 5. 处理输出
+    for (const auto& output : outputs) {
+        std::cout << "Output size: " << output.size() << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+**注意**: ONNX 功能需要在编译时启用 `-DMINI_INFER_ENABLE_ONNX=ON` 并安装 Protobuf 依赖。
 
 ### 运行推理
 

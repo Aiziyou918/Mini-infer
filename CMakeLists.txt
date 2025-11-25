@@ -33,6 +33,7 @@ option(MINI_INFER_BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(MINI_INFER_ENABLE_CUDA "Enable CUDA backend (future support)" OFF)
 option(MINI_INFER_ENABLE_PROFILING "Enable profiling support" ON)
 option(MINI_INFER_ENABLE_LOGGING "Enable logging support" ON)
+option(MINI_INFER_ENABLE_ONNX "Enable ONNX model import support" ON)
 
 # ==============================================================================
 # Global Settings
@@ -118,6 +119,47 @@ if(MINI_INFER_ENABLE_CUDA)
     add_definitions(-DMINI_INFER_CUDA_ENABLED)
 endif()
 
+# ONNX Support (Auto Configuration)
+if(MINI_INFER_ENABLE_ONNX)
+    # Find Abseil (required by Protobuf)
+    find_package(absl CONFIG REQUIRED)
+    message(STATUS "Found Abseil")
+    
+    # Find Protobuf using CONFIG mode for modern CMake targets
+    find_package(Protobuf REQUIRED CONFIG)
+    if(Protobuf_FOUND)
+        message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
+        
+        # Include ONNX auto-configuration module
+        include(cmake/ConfigureONNX.cmake)
+        
+        # Check prerequisites
+        check_onnx_prerequisites()
+        if(ONNX_PREREQUISITES_MET)
+            # Auto-configure ONNX (download proto, generate C++ files)
+            configure_onnx()
+            
+            # Set up definitions (include paths handled by target-based linking)
+            add_definitions(-DMINI_INFER_ONNX_ENABLED)
+            
+            message(STATUS "ONNX support enabled with auto-configuration")
+        else()
+            message(WARNING "ONNX prerequisites not met. ONNX support will be disabled.")
+            set(MINI_INFER_ENABLE_ONNX OFF)
+        endif()
+    else()
+        message(WARNING "Protobuf not found. ONNX support will be disabled.")
+        message(WARNING "Install Protobuf: vcpkg install protobuf (Windows) or apt install libprotobuf-dev (Linux)")
+        set(MINI_INFER_ENABLE_ONNX OFF)
+    endif()
+endif()
+
+# Logging Support
+if(MINI_INFER_ENABLE_LOGGING)
+    add_definitions(-DMINI_INFER_ENABLE_LOGGING)
+    message(STATUS "Logging support enabled")
+endif()
+
 # ==============================================================================
 # Subdirectories
 # ==============================================================================
@@ -142,6 +184,11 @@ add_subdirectory(src/runtime)
 
 # Utils
 add_subdirectory(src/utils)
+
+# Importers (ONNX, etc.)
+if(MINI_INFER_ENABLE_ONNX)
+    add_subdirectory(src/importers)
+endif()
 
 # Tests
 if(MINI_INFER_BUILD_TESTS)
@@ -188,6 +235,7 @@ message(STATUS "Build Tests:       ${MINI_INFER_BUILD_TESTS}")
 message(STATUS "Build Examples:    ${MINI_INFER_BUILD_EXAMPLES}")
 message(STATUS "Build Shared Libs: ${MINI_INFER_BUILD_SHARED_LIBS}")
 message(STATUS "Enable CUDA:       ${MINI_INFER_ENABLE_CUDA}")
+message(STATUS "Enable ONNX:       ${MINI_INFER_ENABLE_ONNX}")
 message(STATUS "Enable Profiling:  ${MINI_INFER_ENABLE_PROFILING}")
 message(STATUS "Enable Logging:    ${MINI_INFER_ENABLE_LOGGING}")
 message(STATUS "========================================")

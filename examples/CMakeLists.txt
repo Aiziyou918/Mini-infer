@@ -10,6 +10,11 @@ set(EXAMPLE_SOURCES
     lenet5_inference.cpp
 )
 
+# ONNX examples (only if ONNX is enabled)
+if(MINI_INFER_ENABLE_ONNX)
+    list(APPEND EXAMPLE_SOURCES onnx_parser_example.cpp)
+endif()
+
 foreach(example_src ${EXAMPLE_SOURCES})
     get_filename_component(example_name ${example_src} NAME_WE)
     
@@ -24,5 +29,10 @@ foreach(example_src ${EXAMPLE_SOURCES})
             mini_infer_runtime
             mini_infer_utils
     )
+    
+    # Link ONNX importers if ONNX is enabled and this is an ONNX example
+    if(MINI_INFER_ENABLE_ONNX AND example_name STREQUAL "onnx_parser_example")
+        target_link_libraries(${example_name} PRIVATE mini_infer_importers)
+    endif()
 endforeach()
 

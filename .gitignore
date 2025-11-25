@@ -48,6 +48,8 @@ compile_commands.json
 CTestTestfile.cmake
 _deps/
 *.cmake
+# Allow cmake modules in cmake/ directory
+!cmake/*.cmake
 
 # Build artifacts
 bin/
@@ -93,7 +95,7 @@ weights/
 .conda/
 
 # Third-party
-third-party/
+third_party/
 
 # Test samples
 test_samples/

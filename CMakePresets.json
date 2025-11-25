@@ -25,7 +25,8 @@
       "displayName": "Windows Debug",
       "inherits": "windows-base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MINI_INFER_ENABLE_ONNX": "OFF"
       }
     },
     {
@@ -33,7 +34,8 @@
       "displayName": "Windows Release",
       "inherits": "windows-base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "MINI_INFER_ENABLE_ONNX": "OFF"
       }
     },
     {
@@ -55,13 +57,84 @@
       "displayName": "Linux Debug",
       "inherits": "linux-base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MINI_INFER_ENABLE_ONNX": "OFF"
       }
     },
     {
       "name": "linux-release",
       "displayName": "Linux Release",
       "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MINI_INFER_ENABLE_ONNX": "OFF"
+      }
+    },
+    {
+      "name": "windows-vcpkg-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
+        "MINI_INFER_ENABLE_ONNX": "ON",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "environment": {
+        "CC": "cl",
+        "CXX": "cl"
+      }
+    },
+    {
+      "name": "windows-vcpkg-debug",
+      "displayName": "Windows vcpkg Debug (with ONNX)",
+      "inherits": "windows-vcpkg-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-vcpkg-release",
+      "displayName": "Windows vcpkg Release (with ONNX)",
+      "inherits": "windows-vcpkg-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-onnx-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
+        "MINI_INFER_ENABLE_ONNX": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-onnx-debug",
+      "displayName": "Linux Debug (with ONNX)",
+      "inherits": "linux-onnx-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-onnx-release",
+      "displayName": "Linux Release (with ONNX)",
+      "inherits": "linux-onnx-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -85,6 +158,24 @@
     {
       "name": "linux-release",
       "configurePreset": "linux-release"
+    },
+    {
+      "name": "windows-vcpkg-debug",
+      "configurePreset": "windows-vcpkg-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-vcpkg-release",
+      "configurePreset": "windows-vcpkg-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-onnx-debug",
+      "configurePreset": "linux-onnx-debug"
+    },
+    {
+      "name": "linux-onnx-release",
+      "configurePreset": "linux-onnx-release"
     }
   ],
   "testPresets": [
@@ -106,6 +197,26 @@
     {
       "name": "linux-release",
       "configurePreset": "linux-release",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "windows-vcpkg-debug",
+      "configurePreset": "windows-vcpkg-debug",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "windows-vcpkg-release",
+      "configurePreset": "windows-vcpkg-release",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "linux-onnx-debug",
+      "configurePreset": "linux-onnx-debug",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "linux-onnx-release",
+      "configurePreset": "linux-onnx-release",
       "output": {"outputOnFailure": true}
     }
   ]

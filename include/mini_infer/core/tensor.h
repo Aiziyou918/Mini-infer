@@ -15,6 +15,7 @@ enum class DataType {
     FLOAT32, ///< 32-bit floating point
     FLOAT16, ///< 16-bit floating point
     INT32, ///< 32-bit integer
+    INT64, ///< 64-bit integer
     INT8, ///< 8-bit integer
     UINT8, ///< 8-bit unsigned integer
     BOOL, ///< Boolean
@@ -135,6 +136,12 @@ public:
      * @return The created tensor
      */
     static std::shared_ptr<Tensor> create(const Shape& shape, DataType dtype);
+
+    /**
+     * @brief Get the size of the element in the tensor
+     * @return The size of the element in the tensor
+     */
+    size_t element_size() const;
     
 private:
     Shape shape_; ///< The shape of the tensor
@@ -146,12 +153,6 @@ private:
      * @return The size of the tensor in bytes
      */
     void allocate();
-
-    /**
-     * @brief Get the size of the element in the tensor
-     * @return The size of the element in the tensor
-     */
-    size_t element_size() const;
 };
 
 } // namespace core
