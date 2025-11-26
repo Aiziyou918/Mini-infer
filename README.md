@@ -45,144 +45,161 @@ Mini-Infer/
   - GCC 7+ (Linux)
   - Clang 5+ (macOS)
 
-### 可选依赖
+### 推荐：使用 Conan 包管理器（跨平台）
 
-#### ONNX 模型导入支持
+**强烈推荐使用 Conan 进行依赖管理**，它提供真正的跨平台一键式构建体验：
 
-如果需要启用 ONNX 模型导入功能，需要安装 Protobuf：
-
-**Windows (推荐使用 vcpkg):**
-```powershell
-# 1. 安装 vcpkg
-git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
-cd C:\vcpkg
-.\bootstrap-vcpkg.bat
-
-# 2. 安装 protobuf
-.\vcpkg install protobuf:x64-windows
-
-# 3. 配置环境变量 (可选)
-# 将 C:\vcpkg\installed\x64-windows\bin 添加到 PATH
-```
-
-**Linux (Ubuntu/Debian):**
 ```bash
-sudo apt-get update
-sudo apt-get install -y libprotobuf-dev protobuf-compiler
+# 安装 Conan (所有平台)
+pip install conan
+
+# 初始化 Conan profile
+conan profile detect --force
 ```
 
-**Linux (CentOS/RHEL):**
-```bash
-sudo yum install -y protobuf-devel protobuf-compiler
-```
+使用 Conan 后，所有依赖（包括 Protobuf）都会自动下载和配置，无需手动安装！
 
-**macOS:**
-```bash
-brew install protobuf
-```
+详细说明请参考：[Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)
 
 ## 快速开始
 
 ### 构建项目
 
-#### Windows (基础构建)
+#### 🚀 方式 1: 使用 Conan（推荐，跨平台一键式）
 
+**Windows:**
 ```powershell
-mkdir build
-cd build
-cmake ..
+# 使用自动化脚本（推荐，一键完成所有步骤）
+.\build.ps1
+
+# 或手动执行（Debug 构建 + ONNX 支持）
+# 步骤 1: 安装依赖（使用默认输出目录）
+conan install . -s build_type=Debug -o enable_onnx=True --build=missing
+
+# 步骤 2: 配置 CMake（自动使用 Conan 生成的预设）
+cmake --preset conan-debug
+
+# 步骤 3: 编译
+cmake --build build/Debug
+
+# 步骤 4: 运行示例
+.\build\Debug\bin\onnx_parser_example.exe .\models\python\lenet5\models\lenet5.onnx
+
+# Release 构建
+conan install . -s build_type=Release -o enable_onnx=True --build=missing
+cmake --preset conan-release
+cmake --build build/Release
+```
+
+**Linux/macOS:**
+```bash
+# 使用自动化脚本（推荐，一键完成所有步骤）
+chmod +x build.sh
+./build.sh
+
+# 或手动执行（Debug 构建 + ONNX 支持）
+# 步骤 1: 安装依赖（使用默认输出目录）
+conan install . -s build_type=Debug -o enable_onnx=True --build=missing
+
+# 步骤 2: 配置 CMake（自动使用 Conan 生成的预设）
+cmake --preset conan-debug
+
+# 步骤 3: 编译
+cmake --build build/Debug
+
+# 步骤 4: 运行示例
+./build/Debug/bin/onnx_parser_example ./models/python/lenet5/models/lenet5.onnx
+
+# Release 构建
+conan install . -s build_type=Release -o enable_onnx=True --build=missing
+cmake --preset conan-release
+cmake --build build/Release
+```
+
+**🎉 Conan 优势:**
+- ✅ **真正的跨平台**: Windows/Linux/macOS 完全相同的命令
+- ✅ **自动依赖管理**: 自动下载和配置 Protobuf、Abseil 等所有依赖
+- ✅ **自动 ONNX 配置**: 自动下载 proto 文件、生成 C++ 代码
+- ✅ **选项自动传递**: `-o enable_onnx=True` 自动转换为 `MINI_INFER_ENABLE_ONNX=ON`
+- ✅ **零手动配置**: 一条命令搞定所有事情
+- ✅ **可重现构建**: 锁定依赖版本，确保一致性
+
+**⚡ 自动化脚本特性:**
+
+- ✅ **智能 Ninja 检测**: 自动检测并建议安装 Ninja 生成器（提升 50%+ 编译速度）
+- ✅ **自动依赖管理**: 一键安装所有依赖
+- ✅ **灵活配置**: 支持所有 Conan 选项
+
+**参数说明:**
+- **Windows**: `.\build.ps1 [-BuildType Debug|Release] [-Clean] [-Test] [-Install]`
+- **Linux/macOS**: `./build.sh [-d|-r] [-c] [-t] [-i] [--no-onnx] [--enable-cuda]`
+
+示例：
+```powershell
+# Windows: Release 构建 + 运行测试
+.\build.ps1 -BuildType Release -Test
+
+# Linux: Release 构建 + 清理 + 安装
+./build.sh -r -c -i
+```
+
+详见：[快速开始指南](QUICK_START.md) | [Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)
+
+#### 方式 2: 传统构建（基础功能，不含 ONNX）
+
+**Windows:**
+```powershell
+mkdir build && cd build
+cmake .. -DMINI_INFER_ENABLE_ONNX=OFF
 cmake --build . --config Release
 ```
 
-#### Windows (使用 vcpkg + ONNX 支持)
-
-```powershell
-# 方法 1: 使用 CMake 预设 (推荐) - 全自动配置
-cmake --preset windows-vcpkg-release
-cmake --build --preset windows-vcpkg-release
-
-# 方法 2: 手动指定工具链 - 全自动配置
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DMINI_INFER_ENABLE_ONNX=ON
-cmake --build build --config Release
-```
-
-**🚀 自动化特性:**
-- ✅ 自动下载 ONNX proto 文件
-- ✅ 自动检测 protoc 版本兼容性
-- ✅ 自动生成 C++ 代码
-- ✅ 无需手动运行脚本
-
-#### Linux/macOS (基础构建)
-
+**Linux/macOS:**
 ```bash
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DMINI_INFER_ENABLE_ONNX=OFF ..
 make -j$(nproc)
 ```
-
-#### Linux/macOS (ONNX 支持)
-
-```bash
-# 方法 1: 使用 CMake 预设 (推荐) - 全自动配置
-cmake --preset linux-onnx-release
-cmake --build --preset linux-onnx-release
-
-# 方法 2: 手动配置 - 全自动配置
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DMINI_INFER_ENABLE_ONNX=ON ..
-make -j$(nproc)
-```
-
-**🚀 自动化特性:**
-- ✅ 自动下载 ONNX proto 文件
-- ✅ 自动检测 protoc 版本兼容性
-- ✅ 自动生成 C++ 代码
-- ✅ 无需手动运行脚本
 
 ### CMake 预设
 
-项目提供了多个 CMake 预设，简化配置过程：
+Conan 会自动生成 CMake 预设，无需手动配置：
 
-#### 可用预设
+#### 可用预设（由 Conan 自动生成）
 
-**Windows:**
-- `windows-debug` - 基础 Debug 构建
-- `windows-release` - 基础 Release 构建
-- `windows-vcpkg-debug` - 使用 vcpkg + ONNX 的 Debug 构建
-- `windows-vcpkg-release` - 使用 vcpkg + ONNX 的 Release 构建
+- `conan-debug` - Debug 构建
+- `conan-release` - Release 构建
 
-**Linux:**
-- `linux-debug` - 基础 Debug 构建
-- `linux-release` - 基础 Release 构建
-- `linux-onnx-debug` - 启用 ONNX 的 Debug 构建
-- `linux-onnx-release` - 启用 ONNX 的 Release 构建
-
-#### 使用预设
+#### 使用流程
 
 ```bash
-# 查看可用预设
-cmake --list-presets
+# 1. Conan 安装依赖（自动生成预设）
+conan install . -s build_type=Debug -o enable_onnx=True --build=missing
 
-# 配置项目
-cmake --preset <preset-name>
+# 2. 使用生成的预设配置 CMake
+cmake --preset conan-debug
 
-# 构建项目
-cmake --build --preset <preset-name>
+# 3. 构建项目
+cmake --build build/Debug
 
-# 运行测试
-ctest --preset <preset-name>
+# 4. 运行测试
+ctest --preset conan-debug
 ```
+
+**说明：**
+- Conan 会根据 `build_type` 自动生成对应的预设
+- 预设包含了所有依赖路径、编译选项和工具链配置
+- `-o enable_onnx=True` 等选项会自动传递到 CMake
 
 ### 运行测试
 
 ```bash
-# 使用预设运行测试
-ctest --preset windows-vcpkg-release
+# 使用 Conan 生成的预设运行测试
+ctest --preset conan-debug     # Debug 构建
+ctest --preset conan-release   # Release 构建
 
 # 或传统方式
-cd build
+cd build/Debug
 ctest --output-on-failure
 ```
 

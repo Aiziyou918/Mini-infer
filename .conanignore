@@ -1,0 +1,47 @@
+# Conan ignore patterns
+# Specify which files should not be included in the Conan package
+
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# IDE files
+.vscode/
+.vs/
+.idea/
+
+# Version control
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+
+# Tests and examples (typically not needed in package)
+tests/
+examples/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Models and data
+models/
+data/
+checkpoints/
+weights/

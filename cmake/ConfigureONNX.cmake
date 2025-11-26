@@ -53,10 +53,18 @@ function(configure_onnx)
         message(STATUS "[SUCCESS] onnx.proto already exists")
     endif()
     
-    # Step 2: Find protoc
-    find_program(PROTOC_EXECUTABLE protoc)
-    if(NOT PROTOC_EXECUTABLE)
-        message(FATAL_ERROR "protoc not found! Please install Protocol Buffers.")
+    # Step 2: Find protoc (use Conan-provided protoc target if available)
+    if(TARGET protobuf::protoc)
+        # Conan provides protobuf::protoc as an executable target
+        get_target_property(PROTOC_EXECUTABLE protobuf::protoc LOCATION)
+        message(STATUS "Using Conan-provided protoc: ${PROTOC_EXECUTABLE}")
+    else()
+        # Fallback to system protoc
+        find_program(PROTOC_EXECUTABLE protoc)
+        if(NOT PROTOC_EXECUTABLE)
+            message(FATAL_ERROR "protoc not found! Please install Protocol Buffers.")
+        endif()
+        message(STATUS "Using system protoc: ${PROTOC_EXECUTABLE}")
     endif()
     
     # Get protoc version
@@ -65,7 +73,6 @@ function(configure_onnx)
         OUTPUT_VARIABLE PROTOC_VERSION_OUTPUT
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    message(STATUS "Found protoc: ${PROTOC_EXECUTABLE}")
     message(STATUS "Protoc version: ${PROTOC_VERSION_OUTPUT}")
     
     # Step 3: Check if we need to regenerate
@@ -140,12 +147,17 @@ function(check_onnx_prerequisites)
         return()
     endif()
     
-    # Check if protoc is available
-    find_program(PROTOC_EXECUTABLE protoc)
-    if(NOT PROTOC_EXECUTABLE)
-        message(WARNING "protoc not found. ONNX support will be disabled.")
-        return()
+    # Check if protoc is available (Conan target or system)
+    if(TARGET protobuf::protoc)
+        message(STATUS "Found Conan-provided protobuf::protoc target")
+        set(ONNX_PREREQUISITES_MET TRUE PARENT_SCOPE)
+    else()
+        find_program(PROTOC_EXECUTABLE protoc)
+        if(NOT PROTOC_EXECUTABLE)
+            message(WARNING "protoc not found. ONNX support will be disabled.")
+            return()
+        endif()
+        message(STATUS "Found system protoc: ${PROTOC_EXECUTABLE}")
+        set(ONNX_PREREQUISITES_MET TRUE PARENT_SCOPE)
     endif()
-    
-    set(ONNX_PREREQUISITES_MET TRUE PARENT_SCOPE)
 endfunction()
