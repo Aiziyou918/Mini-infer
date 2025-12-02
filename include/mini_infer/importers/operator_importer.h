@@ -66,38 +66,102 @@ public:
     ImporterContext(graph::Graph* graph);
     ~ImporterContext() = default;
 
-    // Graph access
+    /**
+     * @brief Get graph being built
+     * @return Graph pointer
+     */
     graph::Graph* get_graph() { return graph_; }
 
-    // Tensor management
+    /**
+     * @brief Register tensor in the context
+     * @param name Tensor name
+     * @param tensor Shared pointer to tensor
+     */
     void register_tensor(const std::string& name, std::shared_ptr<core::Tensor> tensor);
+
+    /**
+     * @brief Get tensor by name
+     * @param name Tensor name
+     * @return Shared pointer to tensor
+     */
     std::shared_ptr<core::Tensor> get_tensor(const std::string& name);
+
+    /**
+     * @brief Check if tensor exists
+     * @param name Tensor name
+     * @return true if tensor exists
+     */
     bool has_tensor(const std::string& name) const;
 
-    // Node management
+    /**
+     * @brief Add node to the graph
+     * @param node Shared pointer to node
+     */
     void add_node(std::shared_ptr<graph::Node> node);
 
-    // Weight management (initializers)
+    /**
+     * @brief Register weight in the context
+     * @param name Weight name
+     * @param weight Shared pointer to weight
+     */
     void register_weight(const std::string& name, std::shared_ptr<core::Tensor> weight);
+
+    /**
+     * @brief Get weight by name
+     * @param name Weight name
+     * @return Shared pointer to weight
+     */
     std::shared_ptr<core::Tensor> get_weight(const std::string& name);
+
+    /**
+     * @brief Check if weight exists
+     * @param name Weight name
+     * @return true if weight exists
+     */
     bool is_weight(const std::string& name) const;
 
-    // Error handling
+    /**
+     * @brief Set error message
+     * @param message Error message
+     */
     void set_error(const std::string& message);
+
+    /**
+     * @brief Get error message
+     * @return Error message
+     */
     const std::string& get_error() const { return error_message_; }
+
+    /**
+     * @brief Check if there is an error
+     * @return true if there is an error
+     */
     bool has_error() const { return !error_message_.empty(); }
 
-    // Logging
+    /**
+     * @brief Log info message
+     * @param message Info message
+     */
     void log_info(const std::string& message);
+
+    /**
+     * @brief Log warning message
+     * @param message Warning message
+     */
     void log_warning(const std::string& message);
+
+    /**
+     * @brief Set verbose mode
+     * @param verbose true to enable verbose logging
+     */
     void set_verbose(bool verbose) { verbose_ = verbose; }
 
 private:
-    graph::Graph* graph_;
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> tensors_;
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> weights_;
-    std::string error_message_;
-    bool verbose_;
+    graph::Graph* graph_; ///< Graph being built
+    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> tensors_; ///< Tensors registered in the context
+    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> weights_; ///< Weights registered in the context
+    std::string error_message_; ///< Error message
+    bool verbose_; ///< Verbose mode
 };
 
 /**
@@ -141,7 +205,7 @@ public:
     std::vector<std::string> get_supported_operators() const;
 
 private:
-    std::unordered_map<std::string, ImporterFactory> importers_;
+    std::unordered_map<std::string, ImporterFactory> importers_; ///< Operator importers registry
 
     void register_builtin_operators();
 };

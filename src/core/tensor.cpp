@@ -79,6 +79,21 @@ void Tensor::reshape(const Shape& new_shape) {
     shape_ = new_shape;
 }
 
+std::shared_ptr<Tensor> Tensor::view(const Shape& new_shape) const {
+    // Check that the total number of elements matches
+    if (new_shape.numel() != shape_.numel()) {
+        return nullptr;  // Invalid view
+    }
+    
+    // Create a new Tensor object
+    auto view_tensor = std::make_shared<Tensor>();
+    view_tensor->shape_ = new_shape;
+    view_tensor->dtype_ = dtype_;
+    view_tensor->data_ = data_;  // Share the same data pointer (zero-copy!)
+    
+    return view_tensor;
+}
+
 std::shared_ptr<Tensor> Tensor::create(const Shape& shape, DataType dtype) {
     return std::make_shared<Tensor>(shape, dtype);
 }

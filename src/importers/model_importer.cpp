@@ -82,6 +82,41 @@ core::Status ModelImporter::import_graph(
             return status;
         }
     }
+
+    // Ensure graph has placeholder nodes for inputs and outputs
+    {
+        for (int i = 0; i < graph_proto.input_size(); ++i) {
+            const auto& input = graph_proto.input(i);
+            const std::string& name = input.name();
+            if (!ctx.get_graph()->get_node(name)) {
+                ctx.get_graph()->create_node(name);
+            }
+        }
+        for (int i = 0; i < graph_proto.output_size(); ++i) {
+            const auto& output = graph_proto.output(i);
+            const std::string& name = output.name();
+            if (!ctx.get_graph()->get_node(name)) {
+                ctx.get_graph()->create_node(name);
+            }
+        }
+    }
+
+    // Set graph inputs and outputs
+    {
+        std::vector<std::string> input_names;
+        input_names.reserve(graph_proto.input_size());
+        for (int i = 0; i < graph_proto.input_size(); ++i) {
+            input_names.push_back(graph_proto.input(i).name());
+        }
+        ctx.get_graph()->set_inputs(input_names);
+        
+        std::vector<std::string> output_names;
+        output_names.reserve(graph_proto.output_size());
+        for (int i = 0; i < graph_proto.output_size(); ++i) {
+            output_names.push_back(graph_proto.output(i).name());
+        }
+        ctx.get_graph()->set_outputs(output_names);
+    }
     
     return core::Status::SUCCESS;
 }
@@ -101,7 +136,7 @@ core::Status ModelImporter::import_initializers(
         auto tensor = WeightImporter::import_tensor(tensor_proto, error_msg);
         
         if (!tensor) {
-            ctx.set_error("Failed to import initializer '" + name + "': " + error_msg);
+            ctx.set_error("  Failed to import initializer '" + name + "': " + error_msg);
             return core::Status::ERROR_INVALID_ARGUMENT;
         }
         
@@ -129,8 +164,14 @@ core::Status ModelImporter::import_inputs(
             continue;
         }
         
-        ctx.log_info("  Input: " + name);
-        // TODO: Create placeholder tensors for inputs if needed
+        // Create placeholder tensor for input if not already registered
+        if (!ctx.has_tensor(name)) {
+            auto input_tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(name, input_tensor);
+            ctx.log_info("  Created input placeholder: " + name);
+        } else {
+            ctx.log_info("  Input already registered: " + name);
+        }
     }
     
     return core::Status::SUCCESS;
@@ -144,8 +185,18 @@ core::Status ModelImporter::import_outputs(
     
     for (int i = 0; i < graph_proto.output_size(); ++i) {
         const auto& output = graph_proto.output(i);
-        ctx.log_info("  Output: " + output.name());
-        // TODO: Mark tensors as outputs
+        const std::string& output_name = output.name();
+        ctx.log_info("  Output: " + output_name);
+        
+        // Ensure output tensor exists
+        if (!ctx.has_tensor(output_name)) {
+            auto output_tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(output_name, output_tensor);
+            ctx.log_info("  Created output tensor: " + output_name);
+        }
+        
+        // Mark as graph output (store output names for later use)
+        // The actual graph output marking will be done after all nodes are created
     }
     
     return core::Status::SUCCESS;

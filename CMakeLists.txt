@@ -61,6 +61,7 @@ if(MSVC)
         /WX-         # Warnings not as errors (remove - for strict)
         /MP          # Multi-processor compilation
         /permissive- # Standards conformance
+        /utf-8       # Treat source files as UTF-8 to avoid code page issues
     )
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     add_definitions(-DNOMINMAX)

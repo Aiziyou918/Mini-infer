@@ -124,10 +124,18 @@ public:
     bool empty() const { return data_ == nullptr; }
 
     /**
-     * @brief Reshape the tensor
+     * @brief Reshape the tensor in-place
      * @param new_shape The new shape of the tensor
      */
     void reshape(const Shape& new_shape);
+
+    /**
+     * @brief Create a view of the tensor with a different shape (zero-copy)
+     * The new tensor shares the same underlying data but has a different shape.
+     * @param new_shape The new shape of the view
+     * @return A new tensor that shares data with this tensor
+     */
+    std::shared_ptr<Tensor> view(const Shape& new_shape) const;
 
     /**
      * @brief Create a tensor

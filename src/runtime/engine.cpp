@@ -64,8 +64,11 @@ core::Status Engine::forward(
         }
     }
     
-    // Execute all nodes
+    // Execute all nodes (skip placeholder nodes without operator)
     for (auto& node : sorted_nodes_) {
+        if (!node || !node->get_operator()) {
+            continue;
+        }
         auto status = execute_node(node);
         if (status != core::Status::SUCCESS) {
             MI_LOG_ERROR("Node execution failed: " + node->name());
@@ -111,8 +114,12 @@ core::Status Engine::allocate_tensors() {
 }
 
 core::Status Engine::execute_node(std::shared_ptr<graph::Node> node) {
-    if (!node || !node->get_operator()) {
+    if (!node) {
         return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    // Placeholder nodes (e.g., graph inputs) have no operator; skip execution
+    if (!node->get_operator()) {
+        return core::Status::SUCCESS;
     }
     
     // Collect input tensors
@@ -122,6 +129,20 @@ core::Status Engine::execute_node(std::shared_ptr<graph::Node> node) {
         if (!outputs.empty()) {
             input_tensors.push_back(outputs[0]);
         }
+    }
+
+    // Merge with importer-captured inputs to include weights/bias, while
+    // allowing graph-connected data tensors to override the first entries.
+    const auto& imported_inputs = node->input_tensors();
+    if (!imported_inputs.empty()) {
+        auto merged = imported_inputs; // copy
+        if (!input_tensors.empty()) {
+            const size_t n = std::min(merged.size(), input_tensors.size());
+            for (size_t i = 0; i < n; ++i) {
+                merged[i] = input_tensors[i];
+            }
+        }
+        input_tensors.swap(merged);
     }
     
     // Execute operator

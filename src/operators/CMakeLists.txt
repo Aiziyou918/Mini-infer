@@ -5,6 +5,7 @@ set(OPERATORS_SOURCES
     relu.cpp
     linear.cpp
     pooling.cpp
+    flatten.cpp
 )
 
 add_library(mini_infer_operators ${OPERATORS_SOURCES})
