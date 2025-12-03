@@ -9,6 +9,7 @@
 #include "mini_infer/operators/pooling.h"
 #include "mini_infer/operators/relu.h"
 #include "mini_infer/operators/flatten.h"
+#include "mini_infer/operators/reshape.h"
 #include "onnx.pb.h"
 
 namespace mini_infer {
@@ -189,6 +190,7 @@ core::Status GemmImporter::import_operator(ImporterContext& ctx, const onnx::Nod
         ctx.add_node(graph_node);
         return core::Status::SUCCESS;
     } else {
+        // TODO: Support other parameters
         ctx.log_warning("Gemm with non-standard parameters not fully supported yet");
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }
@@ -500,38 +502,86 @@ core::Status MulImporter::import_operator(ImporterContext& ctx, const onnx::Node
 core::Status ReshapeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     AttributeHelper attrs(node);
     int64_t allowzero = attrs.get_int("allowzero", 0);
-    (void)allowzero; // Suppress unused variable warning
     
-    // For LeNet-5, Reshape is used as Flatten. Implement as Flatten(axis=1).
-    ctx.log_info("Reshape operator -> treat as Flatten(axis=1) for LeNet-5");
+    ctx.log_info("Reshape operator");
     
-    // Validate inputs: data + shape(optional/const)
-    if (node.input_size() < 1) {
-        ctx.set_error("Reshape requires at least 1 input (data)");
+    // Validate inputs: data + shape
+    if (node.input_size() < 2) {
+        ctx.set_error("Reshape requires 2 inputs (data, shape)");
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
     
-    // Create Flatten parameter
-    operators::FlattenParam param;
-    param.axis = 1; // flatten starting from channel dim
-    auto op = std::make_shared<operators::Flatten>(param);
+    // Create Reshape operator
+    operators::ReshapeParam param;
+    param.allowzero = (allowzero != 0);
+    
+    // Try to get shape from initializer (constant shape)
+    const std::string& shape_input_name = node.input(1);
+    auto shape_weight = ctx.get_weight(shape_input_name);
+    
+    if (shape_weight) {
+        // Shape is a constant tensor, extract the shape values
+        if (shape_weight->dtype() != core::DataType::INT64) {
+            ctx.set_error("Reshape shape tensor must be INT64");
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+        
+        const int64_t* shape_data = static_cast<const int64_t*>(shape_weight->data());
+        size_t shape_size = static_cast<size_t>(shape_weight->shape().numel());
+        param.shape.assign(shape_data, shape_data + shape_size);
+        
+        ctx.log_info("Reshape with constant shape: [" + 
+                     [&]() {
+                         std::string s;
+                         for (size_t i = 0; i < param.shape.size(); ++i) {
+                             if (i > 0) s += ", ";
+                             s += std::to_string(param.shape[i]);
+                         }
+                         return s;
+                     }() + "]");
+    }
+    
+    auto op = std::make_shared<operators::Reshape>(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
     graph_node->set_operator(op);
     
-    // Set input tensor (only use the first input, ignore shape input for LeNet-5)
-    const std::string& input_name = node.input(0);
-    auto input_tensor = ctx.get_tensor(input_name);
-    if (!input_tensor) {
-        input_tensor = std::make_shared<core::Tensor>();
-        ctx.register_tensor(input_name, input_tensor);
-    }
-    graph_node->set_input_tensors({input_tensor});
+    // Collect input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
     
-    // Connect graph edge: input -> reshape(flatten)
-    ctx.get_graph()->create_node(input_name);
-    ctx.get_graph()->connect(input_name, node_name);
+    // Input 0: data tensor
+    const std::string& data_input_name = node.input(0);
+    auto data_tensor = ctx.get_tensor(data_input_name);
+    if (!data_tensor) {
+        data_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(data_input_name, data_tensor);
+    }
+    input_tensors.push_back(data_tensor);
+    
+    // Input 1: shape tensor (may be weight or another tensor)
+    if (shape_weight) {
+        // Shape is constant, add it as input
+        input_tensors.push_back(shape_weight);
+    } else {
+        // Shape is dynamic (from another node's output)
+        auto shape_tensor = ctx.get_tensor(shape_input_name);
+        if (!shape_tensor) {
+            shape_tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(shape_input_name, shape_tensor);
+        }
+        input_tensors.push_back(shape_tensor);
+    }
+    
+    graph_node->set_input_tensors(input_tensors);
+    
+    // Connect graph edges for non-weight inputs
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        if (ctx.is_weight(input_name)) continue;
+        ctx.get_graph()->create_node(input_name);
+        ctx.get_graph()->connect(input_name, node_name);
+    }
     
     // Register output tensor
     const std::string& output_name = node.output(0);
@@ -579,6 +629,14 @@ core::Status FlattenImporter::import_operator(ImporterContext& ctx, const onnx::
         ctx.register_tensor(input_name, input_tensor);
     }
     graph_node->set_input_tensors({input_tensor});
+    
+    // Connect graph edges for non-weight inputs
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        if (ctx.is_weight(input_name)) continue;
+        ctx.get_graph()->create_node(input_name);
+        ctx.get_graph()->connect(input_name, node_name);
+    }
     
     // Register output tensor
     const std::string& output_name = node.output(0);
@@ -629,17 +687,40 @@ core::Status SoftmaxImporter::import_operator(ImporterContext& ctx, const onnx::
 // =============================================================================
 
 core::Status ConstantImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
-    AttributeHelper attrs(node);
-    
     ctx.log_info("Constant operator");
     
-    // Constant nodes contain their value in an attribute
-    // For now, we'll just register them as constants
-    // The actual tensor value would be in the "value" attribute (TensorProto)
+    // Constant nodes contain their value in the "value" attribute (TensorProto)
+    // They don't need to be graph nodes, just register the constant value
     
-    // TODO: Extract the constant value from attributes and register as weight
-    ctx.log_warning("Constant operator import not fully implemented yet");
+    // Find the "value" attribute
+    const onnx::AttributeProto* value_attr = nullptr;
+    for (const auto& attr : node.attribute()) {
+        if (attr.name() == "value" && attr.has_t()) {
+            value_attr = &attr;
+            break;
+        }
+    }
     
+    if (!value_attr) {
+        ctx.set_error("Constant node missing 'value' attribute");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    
+    // Import the constant tensor
+    std::string error_message;
+    auto constant_tensor = WeightImporter::import_tensor(value_attr->t(), error_message);
+    if (!constant_tensor) {
+        ctx.set_error("Failed to import constant tensor: " + error_message);
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    
+    // Register as weight (constant) so it can be used by other nodes
+    const std::string& output_name = node.output(0);
+    ctx.register_weight(output_name, constant_tensor);
+    
+    ctx.log_info("Constant registered: " + output_name + " " + constant_tensor->shape().to_string());
+    
+    // Constant nodes don't create graph nodes - they just provide values
     return core::Status::SUCCESS;
 }
 

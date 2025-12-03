@@ -83,23 +83,6 @@ core::Status ModelImporter::import_graph(
         }
     }
 
-    // Ensure graph has placeholder nodes for inputs and outputs
-    {
-        for (int i = 0; i < graph_proto.input_size(); ++i) {
-            const auto& input = graph_proto.input(i);
-            const std::string& name = input.name();
-            if (!ctx.get_graph()->get_node(name)) {
-                ctx.get_graph()->create_node(name);
-            }
-        }
-        for (int i = 0; i < graph_proto.output_size(); ++i) {
-            const auto& output = graph_proto.output(i);
-            const std::string& name = output.name();
-            if (!ctx.get_graph()->get_node(name)) {
-                ctx.get_graph()->create_node(name);
-            }
-        }
-    }
 
     // Set graph inputs and outputs
     {
