@@ -68,17 +68,29 @@ Write-Host ""
 
 Write-Host "Step 2: Running C++ Mini-Infer Inference" -ForegroundColor Yellow
 Write-Host "----------------------------------------------------------------------"
-$inferenceExe = "..\..\..\build\windows-debug\bin\lenet5_inference.exe"
 
-if (-not (Test-Path $inferenceExe)) {
-    Write-Host "Error: lenet5_inference.exe not found at: $inferenceExe" -ForegroundColor Red
+$ScriptDir   = Split-Path -Parent $PSCommandPath
+$DebugExe    = Join-Path $ScriptDir "..\..\..\build\Debug\bin\lenet5_inference.exe"
+$ReleaseExe  = Join-Path $ScriptDir "..\..\..\build\Release\bin\lenet5_inference.exe"
+
+if (Test-Path $DebugExe) {
+    $inferenceExe = $DebugExe
+} elseif (Test-Path $ReleaseExe) {
+    $inferenceExe = $ReleaseExe
+} else {
+    Write-Host "Error: lenet5_inference.exe not found in Debug or Release." -ForegroundColor Red
+    Write-Host "Checked:" -ForegroundColor Yellow
+    Write-Host "  $DebugExe"
+    Write-Host "  $ReleaseExe"
     Write-Host ""
-    Write-Host "Note: Make sure lenet5_inference is compiled:" -ForegroundColor Yellow
+    Write-Host "Hint: build the target:" -ForegroundColor Yellow
     Write-Host "  cmake --build build --config Debug --target lenet5_inference"
     Write-Host ""
     Read-Host "Press Enter to exit"
     exit 1
 }
+
+Write-Host "Using executable: $inferenceExe" -ForegroundColor Green
 
 & $inferenceExe `
     weights `
