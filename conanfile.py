@@ -8,7 +8,7 @@ class MiniInferRecipe(ConanFile):
     
     # Package metadata
     description = "Mini-Infer: A lightweight deep learning inference framework"
-    author = "Your Name"
+    author = "James"
     topics = ("deep-learning", "inference", "onnx", "neural-network")
     
     # Binary configuration

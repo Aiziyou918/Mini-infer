@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mini_infer/operators/operator.h"
+#include "mini_infer/operators/activation_type.h"
 #include "mini_infer/core/tensor.h"
 
 namespace mini_infer {
@@ -11,7 +12,11 @@ namespace operators {
  * 
  * Reference: TensorRT IConvolutionLayer
  * 
- * Performs: output = Conv2D(input, weight) + bias (if bias exists)
+ * Performs: output = Activation(Conv2D(input, weight) + bias)
+ * 
+ * TensorRT-style features:
+ * - Built-in activation support (setActivation)
+ * - Automatic kernel fusion when activation is set
  * 
  * Input shapes:
  *   - input: [N, C_in, H_in, W_in] (NCHW format)
@@ -37,6 +42,9 @@ struct Conv2DParam : public OpParam {
     int groups;        // Number of groups for grouped convolution
     bool use_bias;     // Whether to use bias
     
+    // TensorRT-style: Built-in activation
+    ActivationParam activation;
+    
     Conv2DParam()
         : kernel_h(3)
         , kernel_w(3)
@@ -47,7 +55,8 @@ struct Conv2DParam : public OpParam {
         , dilation_h(1)
         , dilation_w(1)
         , groups(1)
-        , use_bias(true) {}
+        , use_bias(true)
+        , activation(ActivationType::NONE) {}
     
     Conv2DParam(int kh, int kw, int sh = 1, int sw = 1, 
                 int ph = 0, int pw = 0, int g = 1, bool bias = true)
@@ -60,7 +69,8 @@ struct Conv2DParam : public OpParam {
         , dilation_h(1)
         , dilation_w(1)
         , groups(g)
-        , use_bias(bias) {}
+        , use_bias(bias)
+        , activation(ActivationType::NONE) {}
 };
 
 class Conv2D : public Operator {
@@ -105,6 +115,34 @@ public:
      * @brief Set Conv2D parameters
      */
     void set_param(const Conv2DParam& param) { param_ = param; }
+    
+    /**
+     * @brief Set activation (TensorRT-style API)
+     * 
+     * Similar to TensorRT's IConvolutionLayer::setActivation()
+     * Enables automatic kernel fusion during forward pass
+     * 
+     * @param type Activation type
+     * @param alpha Alpha parameter (for LeakyReLU, ELU, etc.)
+     * @param beta Beta parameter (for Clip, HardSigmoid, etc.)
+     */
+    void set_activation(ActivationType type, float alpha = 0.0f, float beta = 0.0f) {
+        param_.activation = ActivationParam(type, alpha, beta);
+    }
+    
+    /**
+     * @brief Get activation parameters
+     */
+    const ActivationParam& get_activation() const {
+        return param_.activation;
+    }
+    
+    /**
+     * @brief Check if activation is enabled
+     */
+    bool has_activation() const {
+        return param_.activation.is_enabled();
+    }
 
 private:
     Conv2DParam param_;

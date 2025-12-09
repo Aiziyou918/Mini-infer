@@ -44,6 +44,12 @@ public:
     void add_node(const std::shared_ptr<Node>& node);
 
     /**
+     * @brief Remove a node from the graph.
+     * @param name Name of the node to remove
+     */
+    void remove_node(const std::string& name);
+
+    /**
      * @brief Connect two nodes by name: src -> dst.
      * This will:
      *  - validate both nodes exist

@@ -1,12 +1,7 @@
 # Examples
 
 set(EXAMPLE_SOURCES
-    simple_inference.cpp
     build_graph.cpp
-    relu_example.cpp
-    linear_example.cpp
-    conv2d_example.cpp
-    pooling_example.cpp
     lenet5_inference.cpp
 )
 
@@ -14,6 +9,7 @@ set(EXAMPLE_SOURCES
 if(MINI_INFER_ENABLE_ONNX)
     list(APPEND EXAMPLE_SOURCES onnx_parser_example.cpp)
     list(APPEND EXAMPLE_SOURCES lenet5_onnx_test.cpp)
+    list(APPEND EXAMPLE_SOURCES lenet5_optimized_inference.cpp)
 endif()
 
 foreach(example_src ${EXAMPLE_SOURCES})
@@ -34,9 +30,11 @@ foreach(example_src ${EXAMPLE_SOURCES})
     # Link ONNX importers if ONNX is enabled and this is an ONNX example
     if(MINI_INFER_ENABLE_ONNX)
         if(example_name STREQUAL "onnx_parser_example" OR 
-           example_name STREQUAL "lenet5_onnx_test")
+           example_name STREQUAL "lenet5_onnx_test" OR
+           example_name STREQUAL "lenet5_optimized_inference")
             target_link_libraries(${example_name} PRIVATE mini_infer_importers)
         endif()
+        
     endif()
 endforeach()
 

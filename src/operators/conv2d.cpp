@@ -151,6 +151,15 @@ core::Status Conv2D::forward(
             );
         }
         
+        // TensorRT-style: Apply inline activation if set
+        // This enables automatic kernel fusion without explicit fusion pass
+        if (param_.activation.is_enabled()) {
+            int total_elements = N * C_out * H_out * W_out;
+            for (int i = 0; i < total_elements; ++i) {
+                output_data[i] = apply_activation(output_data[i], param_.activation);
+            }
+        }
+        
     } else {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }

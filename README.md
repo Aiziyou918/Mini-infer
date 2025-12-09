@@ -76,6 +76,9 @@ conan profile detect --force
 # 步骤 1: 安装依赖（使用默认输出目录）
 conan install . -s build_type=Debug -o enable_onnx=True --build=missing
 
+# 使用Ninja生成器（推荐，构建更快）
+conan install . -s build_type=Debug -s compiler.cppstd=20 -o enable_onnx=True -c tools.cmake.cmaketoolchain:generator=Ninja --build missing
+
 # 步骤 2: 配置 CMake（自动使用 Conan 生成的预设）
 cmake --preset conan-debug
 

@@ -2,6 +2,8 @@
 set(GRAPH_SOURCES
     node.cpp
     graph.cpp
+    graph_optimizer.cpp
+    fusion_pass.cpp
 )
 
 add_library(mini_infer_graph ${GRAPH_SOURCES})

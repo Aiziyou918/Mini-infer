@@ -1,13 +1,13 @@
 /**
  * @file lenet5_onnx_test.cpp
- * @brief LeNet-5 ONNX 完整测试程序（对标手动版本）
+ * @brief LeNet-5 ONNX Complete Test Program
  * 
- * 功能：
- * 1. 从 ONNX 文件导入 LeNet-5 模型
- * 2. 使用 Runtime Engine 构建推理引擎
- * 3. 加载 MNIST 测试样本
- * 4. 批量推理并计算准确率
- * 5. 输出详细结果和统计信息
+ * Features:
+ * 1. Import LeNet-5 model from ONNX file
+ * 2. Build inference engine using Runtime Engine
+ * 3. Load MNIST test samples
+ * 4. Batch inference and calculate accuracy
+ * 5. Output detailed results and statistics
  * 
  * Usage:
  *   lenet5_onnx_test <model.onnx> <samples_dir> [num_samples] [OPTIONS]
@@ -39,19 +39,19 @@ using namespace mini_infer;
 namespace fs = std::filesystem;
 
 /**
- * @brief 计算 Softmax
+ * @brief Calculate softmax
  */
 std::vector<float> softmax(const std::shared_ptr<core::Tensor>& logits) {
     const float* data = static_cast<const float*>(logits->data());
     int64_t numel = logits->shape().numel();
     
-    // 找到最大值（数值稳定性）
+    // Find the maximum value (numerical stability)
     float max_val = data[0];
     for (int64_t i = 1; i < numel; ++i) {
         if (data[i] > max_val) max_val = data[i];
     }
     
-    // 计算 exp 和 sum
+    // Calculate exp and sum
     std::vector<float> exp_values(numel);
     float sum = 0.0f;
     for (int64_t i = 0; i < numel; ++i) {
@@ -59,7 +59,7 @@ std::vector<float> softmax(const std::shared_ptr<core::Tensor>& logits) {
         sum += exp_values[i];
     }
     
-    // 归一化
+    // Normalize
     for (int64_t i = 0; i < numel; ++i) {
         exp_values[i] /= sum;
     }
@@ -68,7 +68,7 @@ std::vector<float> softmax(const std::shared_ptr<core::Tensor>& logits) {
 }
 
 /**
- * @brief 测试 LeNet-5 ONNX 模型
+ * @brief Test LeNet-5 ONNX model
  */
 void test_lenet5_onnx(
     std::shared_ptr<runtime::Engine> engine,
@@ -82,7 +82,7 @@ void test_lenet5_onnx(
     std::cout << "Testing LeNet-5 ONNX Model on MNIST Samples" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     
-    // 确定实际的样本目录
+    // Determine the actual sample directory
     std::string actual_samples_dir = samples_dir;
     fs::path samples_path(samples_dir);
     
@@ -91,7 +91,7 @@ void test_lenet5_onnx(
         std::cout << "\nNote: Using binary subdirectory: " << actual_samples_dir << std::endl;
     }
     
-    // 获取所有样本文件
+    // Get all sample files
     std::vector<fs::path> sample_files;
     for (const auto& entry : fs::directory_iterator(actual_samples_dir)) {
         if (entry.path().extension() == ".bin") {
@@ -108,7 +108,7 @@ void test_lenet5_onnx(
     std::cout << "\nTesting on " << sample_files.size() << " samples..." << std::endl;
     std::cout << "Sample directory: " << actual_samples_dir << std::endl << std::endl;
     
-    // 存储结果
+    // Store results
     struct SampleResult {
         int index;
         std::string filename;
@@ -128,14 +128,14 @@ void test_lenet5_onnx(
     
     for (const auto& filepath : sample_files) {
         try {
-            // 加载样本
+            // Load sample
             auto input_tensor = utils::load_mnist_sample(filepath.string());
             
-            // 准备输入
+            // Prepare input
             std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs;
             inputs[input_name] = input_tensor;
             
-            // 执行推理
+            // Execute inference
             std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
             auto status = engine->forward(inputs, outputs);
             
@@ -145,7 +145,7 @@ void test_lenet5_onnx(
                 continue;
             }
             
-            // 获取输出
+            // Get output
             auto output_tensor = outputs[output_name];
             if (!output_tensor) {
                 std::cerr << "Error: Output tensor not found for " 
@@ -153,18 +153,18 @@ void test_lenet5_onnx(
                 continue;
             }
             
-            // 获取 logits
+            // Get logits
             const float* logits_data = static_cast<const float*>(output_tensor->data());
             std::vector<float> logits(logits_data, logits_data + 10);
             
-            // 计算概率
+            // Calculate probabilities
             auto probabilities = softmax(output_tensor);
             
-            // 获取预测
+            // Get prediction
             int predicted = utils::argmax(output_tensor);
             float confidence = probabilities[predicted];
             
-            // 从文件名提取标签
+            // Extract label from filename
             std::string filename = filepath.stem().string();
             int label = -1;
             
@@ -181,7 +181,7 @@ void test_lenet5_onnx(
             bool is_correct = (predicted == label);
             if (is_correct && label != -1) correct++;
             
-            // 存储结果
+            // Store results
             results.push_back({
                 total - 1,
                 filepath.filename().string(),
@@ -193,7 +193,7 @@ void test_lenet5_onnx(
                 is_correct
             });
             
-            // 打印结果
+            // Print results
             std::cout << "Sample " << std::setw(4) << total << ": ";
             std::cout << filepath.filename().string();
             std::cout << " -> predicted=" << predicted;
@@ -216,7 +216,7 @@ void test_lenet5_onnx(
         end_time - start_time
     );
     
-    // 打印摘要
+    // Print summary
     std::cout << "\n" << std::string(70, '=') << std::endl;
     std::cout << "Test Summary" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
@@ -235,7 +235,7 @@ void test_lenet5_onnx(
               << avg_time << " ms" << std::endl;
     std::cout << std::string(70, '=') << std::endl;
     
-    // 保存 JSON 输出（可选）
+    // Save JSON output (optional)
     if (!output_json.empty() && !results.empty()) {
         std::cout << "\nSaving outputs to JSON..." << std::endl;
         std::ofstream json_file(output_json);
@@ -292,7 +292,7 @@ void test_lenet5_onnx(
 }
 
 /**
- * @brief 打印使用说明
+ * @brief Print usage instructions
  */
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name 
@@ -318,7 +318,7 @@ int main(int argc, char** argv) {
     std::cout << std::string(70, '=') << std::endl;
     std::cout << std::endl;
     
-    // 解析命令行参数
+    // Parse command line arguments
     std::string model_path;
     std::string samples_dir;
     int num_samples = -1;
@@ -349,7 +349,7 @@ int main(int argc, char** argv) {
         }
     }
     
-    // 显示配置
+    // Display configuration
     std::cout << "Configuration:" << std::endl;
     std::cout << "  ONNX model: " << model_path << std::endl;
     std::cout << "  Samples directory: " << samples_dir << std::endl;
@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
     std::cout << "  Verbose: " << (verbose ? "enabled" : "disabled") << std::endl;
     std::cout << std::endl;
     
-    // 检查文件存在
+    // Check if file exists
     if (!fs::exists(model_path)) {
         std::cerr << "Error: ONNX model file not found: " << model_path << std::endl;
         return 1;
@@ -373,14 +373,14 @@ int main(int argc, char** argv) {
     }
     
     try {
-        // Step 1: 解析 ONNX 模型
+        // Step 1: Parse ONNX model
         std::cout << "Step 1: Parsing ONNX Model" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
         
         importers::OnnxParser parser;
         parser.set_verbose(verbose);
         
-        // 解析得到 unique_ptr，需要转换为 shared_ptr 以匹配 Engine::build 接口
+        // Parse to unique_ptr, need to convert to shared_ptr to match Engine::build interface
         auto graph_uptr = parser.parse_from_file(model_path);
         
         if (!graph_uptr) {
@@ -393,7 +393,7 @@ int main(int argc, char** argv) {
         std::cout << "Graph has " << graph->nodes().size() << " nodes" << std::endl;
         std::cout << std::endl;
         
-        // Step 2: 构建 Runtime 引擎
+        // Step 2: Build Runtime Engine
         std::cout << "Step 2: Building Runtime Engine" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
         
@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
         
         std::cout << "[SUCCESS] Engine built successfully!" << std::endl;
         
-        // 获取输入输出名称
+        // Get input and output names
         auto input_names = engine->get_input_names();
         auto output_names = engine->get_output_names();
         
@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         
-        // Step 3: 运行测试
+        // Step 3: Run tests
         std::cout << "Step 3: Running Tests" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
         

@@ -45,12 +45,14 @@ public:
      * @return The input nodes
      */
     const std::vector<std::shared_ptr<Node>>& inputs() const { return input_nodes_; }
+    std::vector<std::shared_ptr<Node>>& mutable_inputs() { return input_nodes_; }
 
     /**
      * @brief Get the output nodes
      * @return The output nodes
      */
     const std::vector<std::shared_ptr<Node>>& outputs() const { return output_nodes_; }
+    std::vector<std::shared_ptr<Node>>& mutable_outputs() { return output_nodes_; }
     
     /**
      * @brief Get the name of the node

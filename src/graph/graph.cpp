@@ -1,7 +1,7 @@
 #include "mini_infer/graph/graph.h"
 
 #include <queue>
-#include <unordered_set>
+#include <algorithm>
 
 namespace mini_infer {
 namespace graph {
@@ -39,6 +39,38 @@ void Graph::add_node(const std::shared_ptr<Node>& node) {
         return;
     }
     nodes_[name] = node;
+}
+
+void Graph::remove_node(const std::string& name) {
+    auto it = nodes_.find(name);
+    if (it == nodes_.end()) {
+        return;
+    }
+    auto target = it->second;
+    // 清理所有节点中指向该节点的输入/输出引用，避免悬挂指针
+    for (auto& kv : nodes_) {
+        auto node = kv.second;
+        if (!node || node == target) {
+            continue;
+        }
+        // 清理 outputs 中的 target
+        auto& outs = node->mutable_outputs();
+        outs.erase(
+            std::remove_if(
+                outs.begin(),
+                outs.end(),
+                [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
+            outs.end());
+        // 清理 inputs 中的 target
+        auto& ins = node->mutable_inputs();
+        ins.erase(
+            std::remove_if(
+                ins.begin(),
+                ins.end(),
+                [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
+            ins.end());
+    }
+    nodes_.erase(it);
 }
 
 core::Status Graph::connect(const std::string& src_name,

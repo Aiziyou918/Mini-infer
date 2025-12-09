@@ -8,6 +8,7 @@ cmake-build-*/
 .vscode/
 .vs/
 .idea/
+.kiro/
 *.suo
 *.user
 *.sln.docstates
