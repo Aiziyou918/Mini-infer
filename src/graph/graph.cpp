@@ -1,7 +1,8 @@
 #include "mini_infer/graph/graph.h"
 
-#include <queue>
 #include <algorithm>
+#include <queue>
+
 
 namespace mini_infer {
 namespace graph {
@@ -56,31 +57,27 @@ void Graph::remove_node(const std::string& name) {
         // 清理 outputs 中的 target
         auto& outs = node->mutable_outputs();
         outs.erase(
-            std::remove_if(
-                outs.begin(),
-                outs.end(),
-                [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
+            std::remove_if(outs.begin(), outs.end(),
+                           [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
             outs.end());
         // 清理 inputs 中的 target
         auto& ins = node->mutable_inputs();
         ins.erase(
-            std::remove_if(
-                ins.begin(),
-                ins.end(),
-                [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
+            std::remove_if(ins.begin(), ins.end(),
+                           [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
             ins.end());
     }
     nodes_.erase(it);
 }
 
-core::Status Graph::connect(const std::string& src_name,
-                            const std::string& dst_name) {
+core::Status Graph::connect(const std::string& src_name, const std::string& dst_name) {
     if (src_name.empty() || dst_name.empty()) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
     if (src_name == dst_name) {
-        // Generally not allowed to have self-loops; if you need RNN-style, you can open it here and modify the topological logic
+        // Generally not allowed to have self-loops; if you need RNN-style, you can open it here and
+        // modify the topological logic
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
@@ -147,7 +144,8 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
     // 2) Count the in-degree: build directed edges according to outputs
     for (const auto& kv : nodes_) {
         const auto& node = kv.second;
-        if (!node) continue;
+        if (!node)
+            continue;
 
         for (const auto& out : node->outputs()) {
             if (!out) {
@@ -157,8 +155,9 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
             if (it != in_degree.end()) {
                 ++(it->second);
             }
-            // If out is not in in_degree, it means the graph structure is inconsistent, generally it is a graph construction error
-            // Here we do not report an error directly, but let validate()/caller check it
+            // If out is not in in_degree, it means the graph structure is inconsistent, generally
+            // it is a graph construction error Here we do not report an error directly, but let
+            // validate()/caller check it
         }
     }
 
@@ -167,7 +166,8 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
     for (const auto& kv : nodes_) {
         const auto& name = kv.first;
         const auto& node = kv.second;
-        if (!node) continue;
+        if (!node)
+            continue;
 
         auto it = in_degree.find(name);
         if (it != in_degree.end() && it->second == 0) {
@@ -186,10 +186,11 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
         sorted_nodes.push_back(node);
 
         for (const auto& out : node->outputs()) {
-            if (!out) continue;
+            if (!out)
+                continue;
             auto it = in_degree.find(out->name());
             if (it == in_degree.end()) {
-                continue; // Nodes not in nodes_ are ignored; handled by validate()
+                continue;  // Nodes not in nodes_ are ignored; handled by validate()
             }
 
             --(it->second);
@@ -241,5 +242,5 @@ core::Status Graph::validate() const {
     return checked_topological_sort(topo);
 }
 
-} // namespace graph
-} // namespace mini_infer
+}  // namespace graph
+}  // namespace mini_infer

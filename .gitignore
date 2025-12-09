@@ -9,6 +9,7 @@ cmake-build-*/
 .vs/
 .idea/
 .kiro/
+.agent/
 *.suo
 *.user
 *.sln.docstates

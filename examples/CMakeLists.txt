@@ -10,6 +10,7 @@ if(MINI_INFER_ENABLE_ONNX)
     list(APPEND EXAMPLE_SOURCES onnx_parser_example.cpp)
     list(APPEND EXAMPLE_SOURCES lenet5_onnx_test.cpp)
     list(APPEND EXAMPLE_SOURCES lenet5_optimized_inference.cpp)
+    list(APPEND EXAMPLE_SOURCES lenet5_optimized_with_memory_planning.cpp)
 endif()
 
 foreach(example_src ${EXAMPLE_SOURCES})
@@ -31,7 +32,8 @@ foreach(example_src ${EXAMPLE_SOURCES})
     if(MINI_INFER_ENABLE_ONNX)
         if(example_name STREQUAL "onnx_parser_example" OR 
            example_name STREQUAL "lenet5_onnx_test" OR
-           example_name STREQUAL "lenet5_optimized_inference")
+           example_name STREQUAL "lenet5_optimized_inference" OR
+           example_name STREQUAL "lenet5_optimized_with_memory_planning")
             target_link_libraries(${example_name} PRIVATE mini_infer_importers)
         endif()
         

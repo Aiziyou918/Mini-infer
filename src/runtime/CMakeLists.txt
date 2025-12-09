@@ -1,6 +1,7 @@
 # Runtime module
 set(RUNTIME_SOURCES
     engine.cpp
+    memory_planner.cpp
 )
 
 add_library(mini_infer_runtime ${RUNTIME_SOURCES})

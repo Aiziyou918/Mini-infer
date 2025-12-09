@@ -144,7 +144,7 @@ class OutputComparator:
         elif logits['max_absolute_error'] < 1e-3:
             print("  [SUCCESS] Good agreement (< 1e-3)")
         elif logits['max_absolute_error'] < 1e-2:
-            print("  ⚠ Acceptable agreement (< 1e-2)")
+            print("  [WARNING] Acceptable agreement (< 1e-2)")
         else:
             print("  [FAILED] Poor agreement (>= 1e-2)")
         print()
@@ -161,7 +161,7 @@ class OutputComparator:
         elif probs['max_absolute_error'] < 1e-4:
             print("  [SUCCESS] Good agreement (< 1e-4)")
         elif probs['max_absolute_error'] < 1e-3:
-            print("  ⚠ Acceptable agreement (< 1e-3)")
+            print("  [WARNING] Acceptable agreement (< 1e-3)")
         else:
             print("  [FAILED] Poor agreement (>= 1e-3)")
         print()
