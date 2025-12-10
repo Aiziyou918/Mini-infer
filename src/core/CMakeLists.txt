@@ -3,6 +3,7 @@ set(CORE_SOURCES
     tensor.cpp
     allocator.cpp
     types.cpp
+    op_type.cpp
 )
 
 add_library(mini_infer_core ${CORE_SOURCES})

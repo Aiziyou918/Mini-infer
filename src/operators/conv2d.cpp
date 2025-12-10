@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "mini_infer/core/buffer.h"
+#include "mini_infer/core/op_type.h"
 #include "mini_infer/kernels/bias.h"
 #include "mini_infer/kernels/gemm.h"
 #include "mini_infer/kernels/im2col.h"
@@ -12,7 +13,7 @@
 namespace mini_infer {
 namespace operators {
 
-Conv2D::Conv2D(const Conv2DParam& param) : Operator("Conv2D"), param_(param) {}
+Conv2D::Conv2D(const Conv2DParam& param) : Operator(core::op_names::kConv), param_(param) {}
 
 core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                              std::vector<std::shared_ptr<core::Tensor>>& outputs) {

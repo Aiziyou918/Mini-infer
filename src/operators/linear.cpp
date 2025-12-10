@@ -3,13 +3,14 @@
 #include <algorithm>
 #include <cstring>
 
+#include "mini_infer/core/op_type.h"
 #include "mini_infer/kernels/bias.h"
 #include "mini_infer/kernels/gemm.h"
 
 namespace mini_infer {
 namespace operators {
 
-Linear::Linear(const LinearParam& param) : Operator("Linear"), param_(param) {}
+Linear::Linear(const LinearParam& param) : Operator(core::op_names::kLinear), param_(param) {}
 
 core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                              std::vector<std::shared_ptr<core::Tensor>>& outputs) {

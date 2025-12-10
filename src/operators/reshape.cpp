@@ -3,13 +3,15 @@
 #include <algorithm>
 #include <numeric>
 
+#include "mini_infer/core/op_type.h"
+
 namespace mini_infer {
 namespace operators {
 
 // Register Reshape operator
 REGISTER_OPERATOR(Reshape, Reshape);
 
-Reshape::Reshape(const ReshapeParam& param) : Operator("Reshape"), param_(param) {}
+Reshape::Reshape(const ReshapeParam& param) : Operator(core::op_names::kReshape), param_(param) {}
 
 core::Status Reshape::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                               std::vector<std::shared_ptr<core::Tensor>>& outputs) {

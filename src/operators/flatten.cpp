@@ -2,10 +2,12 @@
 
 #include <cstring>
 
+#include "mini_infer/core/op_type.h"
+
 namespace mini_infer {
 namespace operators {
 
-Flatten::Flatten(const FlattenParam& param) : Operator("Flatten"), param_(param) {}
+Flatten::Flatten(const FlattenParam& param) : Operator(core::op_names::kFlatten), param_(param) {}
 
 core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                               std::vector<std::shared_ptr<core::Tensor>>& outputs) {

@@ -2,12 +2,16 @@
 
 #include <stdexcept>
 
+#include "mini_infer/core/op_type.h"
 #include "mini_infer/kernels/pooling.h"
 
 namespace mini_infer {
 namespace operators {
 
-Pooling::Pooling(const PoolingParam& param) : Operator("Pooling"), param_(param) {
+Pooling::Pooling(const PoolingParam& param)
+    : Operator(param.type == PoolingType::MAX ? core::op_names::kMaxPool
+                                              : core::op_names::kAveragePool),
+      param_(param) {
     // Validate parameters
     if (param_.kernel_h <= 0 || param_.kernel_w <= 0) {
         throw std::invalid_argument("Pooling: kernel size must be positive");

@@ -4,14 +4,19 @@
 #include <string>
 #include <vector>
 
+#include "mini_infer/core/op_type.h"
 #include "mini_infer/operators/operator.h"
-
 
 namespace mini_infer {
 namespace graph {
 
 /**
  * @brief Graph node
+ *
+ * TensorRT-style hybrid architecture:
+ * - Caches OpType enum for fast access (graph optimization)
+ * - Maintains string name for custom operators
+ * - Similar to TensorRT's ILayer::getType() + IPluginV2::getPluginType()
  */
 class Node {
    public:
@@ -21,10 +26,10 @@ class Node {
     /**
      * @brief Set the operator
      * @param op The operator to set
+     *
+     * This will automatically cache the OpType for fast access.
      */
-    void set_operator(std::shared_ptr<operators::Operator> op) {
-        op_ = op;
-    }
+    void set_operator(std::shared_ptr<operators::Operator> op);
 
     /**
      * @brief Get the operator
@@ -116,9 +121,30 @@ class Node {
         return output_tensors_;
     }
 
+    /**
+     * @brief Get operator type (fast access for graph optimization)
+     * @return Cached OpType enum
+     *
+     * This is the fast path for graph optimization (switch/case).
+     * Similar to TensorRT's ILayer::getType().
+     */
+    core::OpType type() const {
+        return cached_op_type_;
+    }
+
+    /**
+     * @brief Get operator type name (for custom operators and logging)
+     * @return Operator type string
+     *
+     * This is the slow path for custom operators and debugging.
+     * Similar to TensorRT's IPluginV2::getPluginType().
+     */
+    const char* type_name() const;
+
    private:
     std::string name_;                         //< The name of the node
     std::shared_ptr<operators::Operator> op_;  //< The operator of the node
+    core::OpType cached_op_type_;              //< Cached operator type for fast access
 
     std::vector<std::shared_ptr<Node>> input_nodes_;   //< The input nodes of the node
     std::vector<std::shared_ptr<Node>> output_nodes_;  //< The output nodes of the node

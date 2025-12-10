@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cstring>
 
+#include "mini_infer/core/op_type.h"
+
 namespace mini_infer {
 namespace operators {
 
-ReLU::ReLU() : Operator("ReLU") {}
+ReLU::ReLU() : Operator(core::op_names::kRelu) {}
 
 core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                            std::vector<std::shared_ptr<core::Tensor>>& outputs) {
