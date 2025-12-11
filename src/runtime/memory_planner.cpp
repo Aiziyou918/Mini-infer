@@ -108,8 +108,11 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
         if (node && !node->output_tensors().empty() && node->output_tensors()[0]) {
             auto t = node->output_tensors()[0];
             const auto numel = t->shape().numel();
-            // 简化：假定 float32
-            lifetime.size_bytes = static_cast<size_t>(numel) * sizeof(float);
+            // 形状未推断时，size_in_bytes 也会为 0，需要兜底
+            const size_t bytes = t->size_in_bytes();
+            lifetime.size_bytes = bytes > 0 ? bytes
+                                            : (numel > 0 ? static_cast<size_t>(numel) * sizeof(float)
+                                                         : 1024);
         } else {
             lifetime.size_bytes = 1024;  // fallback
         }
@@ -195,10 +198,10 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
     MI_LOG_INFO("[MemoryPlanner] Analyzed " + std::to_string(lifetimes.size()) + " tensors");
 
     // 计算原始内存占用
-    plan.original_memory = 0;
+    size_t original_memory = 0;
     for (const auto& lt : lifetimes) {
         if (!lt.is_persistent) {
-            plan.original_memory += align_size(lt.size_bytes);
+            original_memory += align_size(lt.size_bytes);
         }
     }
 
@@ -209,6 +212,8 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
 
     // Step 3: 贪心着色算法分配内存池
     plan = greedy_coloring(interference_graph, lifetimes);
+    // 恢复原始内存统计，避免被新 plan 覆盖
+    plan.original_memory = original_memory;
 
     // Step 4: 计算统计信息
     plan.compute_statistics();
