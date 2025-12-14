@@ -1,6 +1,8 @@
 #pragma once
 
 #include "mini_infer/graph/graph.h"
+#include "mini_infer/graph/graph_optimizer.h"
+#include "mini_infer/runtime/memory_planner.h"
 #include "mini_infer/backends/backend.h"
 #include "mini_infer/core/types.h"
 #include <memory>
@@ -11,12 +13,15 @@ namespace mini_infer {
 namespace runtime {
 
 /**
- * @brief Config Inference Engine
+ * @brief Config Inference Engine (TensorRT-style)
  */
 struct EngineConfig {
     core::DeviceType device_type{core::DeviceType::CPU};
     int32_t device_id{0};
     bool enable_profiling{false};
+    bool enable_graph_optimization{true};     // Enable graph optimization
+    bool enable_memory_planning{true};        // Enable memory planning
+    size_t memory_alignment{256};             // Memory alignment (bytes)
     size_t max_workspace_size{1024 * 1024 * 1024}; // 1GB
 };
 
@@ -76,15 +81,50 @@ public:
      * @return std::string 
      */
     std::string get_profiling_info() const;
+
+    /**
+     * @brief Get memory plan (if memory planning was enabled)
+     */
+    const MemoryPlan& get_memory_plan() const { return memory_plan_; }
+
+    /**
+     * @brief Get optimization statistics
+     */
+    const graph::GraphOptimizer::Statistics& get_optimization_stats() const { 
+        return optimization_stats_; 
+    }
     
 private:
     EngineConfig config_; ///< Engine config
     std::shared_ptr<graph::Graph> graph_; ///< Graph
     std::shared_ptr<backends::Backend> backend_; ///< Backend
     std::vector<std::shared_ptr<graph::Node>> sorted_nodes_; ///< Sorted nodes
+    MemoryPlan memory_plan_; ///< Memory plan result
+    graph::GraphOptimizer::Statistics optimization_stats_; ///< Optimization statistics
     
     /**
-     * @brief Allocate tensors
+     * @brief Apply graph optimizations (TensorRT-style)
+     * 
+     * @return core::Status 
+     */
+    core::Status optimize_graph();
+
+    /**
+     * @brief Infer shapes for all tensors in the graph
+     * 
+     * @return core::Status 
+     */
+    core::Status infer_shapes();
+
+    /**
+     * @brief Plan memory allocation (TensorRT-style)
+     * 
+     * @return core::Status 
+     */
+    core::Status plan_memory();
+
+    /**
+     * @brief Allocate tensors based on shapes and memory plan
      * 
      * @return core::Status 
      */

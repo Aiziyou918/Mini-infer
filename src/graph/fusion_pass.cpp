@@ -124,3 +124,17 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
 
 }  // namespace graph
 }  // namespace mini_infer
+
+// Auto-register FusionPass with priority 100 (default)
+namespace {
+std::shared_ptr<mini_infer::graph::OptimizationPass> create_FusionPass() {
+    return std::make_shared<mini_infer::graph::FusionPass>();
+}
+struct FusionPass_Register {
+    FusionPass_Register() {
+        mini_infer::graph::OptimizationPassRegistry::instance()
+            .register_pass("FusionPass", create_FusionPass, 100);
+    }
+};
+static FusionPass_Register g_FusionPass_register;
+}  // namespace

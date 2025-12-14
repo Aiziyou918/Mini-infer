@@ -1,12 +1,80 @@
 #include "mini_infer/graph/graph_optimizer.h"
 #include "mini_infer/utils/logger.h"
+#include <algorithm>
 
 namespace mini_infer {
 namespace graph {
 
+// ============================================================================
+// OptimizationPassRegistry Implementation
+// ============================================================================
+
+OptimizationPassRegistry& OptimizationPassRegistry::instance() {
+    static OptimizationPassRegistry registry;
+    return registry;
+}
+
+void OptimizationPassRegistry::register_pass(const std::string& name, 
+                                             PassCreator creator, 
+                                             int priority) {
+    PassInfo info;
+    info.name = name;
+    info.creator = creator;
+    info.priority = priority;
+    passes_.push_back(info);
+    
+    // Keep sorted by priority
+    std::sort(passes_.begin(), passes_.end());
+}
+
+std::vector<std::shared_ptr<OptimizationPass>> 
+OptimizationPassRegistry::get_default_passes() const {
+    std::vector<std::shared_ptr<OptimizationPass>> result;
+    result.reserve(passes_.size());
+    
+    for (const auto& info : passes_) {
+        if (info.creator) {
+            result.push_back(info.creator());
+        }
+    }
+    
+    return result;
+}
+
+bool OptimizationPassRegistry::has_pass(const std::string& name) const {
+    for (const auto& info : passes_) {
+        if (info.name == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================================
+// GraphOptimizer Implementation
+// ============================================================================
+
+GraphOptimizer GraphOptimizer::create_default() {
+    GraphOptimizer optimizer;
+    optimizer.load_default_passes();
+    return optimizer;
+}
+
 void GraphOptimizer::add_pass(std::shared_ptr<OptimizationPass> pass) {
     if (pass) {
         passes_.push_back(pass);
+    }
+}
+
+void GraphOptimizer::load_default_passes() {
+    auto default_passes = OptimizationPassRegistry::instance().get_default_passes();
+    for (auto& pass : default_passes) {
+        add_pass(pass);
+    }
+    
+    if (verbose_) {
+        MI_LOG_INFO("[GraphOptimizer] Loaded " + std::to_string(default_passes.size()) + 
+                    " default optimization passes");
     }
 }
 

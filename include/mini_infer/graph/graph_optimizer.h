@@ -37,6 +37,52 @@ protected:
 };
 
 /**
+ * @brief Optimization Pass Registry (TensorRT-style)
+ * 
+ * Global registry for optimization passes.
+ * Passes can auto-register themselves using REGISTER_OPTIMIZATION_PASS macro.
+ */
+class OptimizationPassRegistry {
+public:
+    using PassCreator = std::shared_ptr<OptimizationPass>(*)();
+
+    /**
+     * @brief Get singleton instance
+     */
+    static OptimizationPassRegistry& instance();
+
+    /**
+     * @brief Register an optimization pass
+     */
+    void register_pass(const std::string& name, PassCreator creator, int priority = 100);
+
+    /**
+     * @brief Get all registered passes (sorted by priority)
+     */
+    std::vector<std::shared_ptr<OptimizationPass>> get_default_passes() const;
+
+    /**
+     * @brief Check if a pass is registered
+     */
+    bool has_pass(const std::string& name) const;
+
+private:
+    OptimizationPassRegistry() = default;
+    
+    struct PassInfo {
+        std::string name;
+        PassCreator creator;
+        int priority; // Lower number = higher priority
+        
+        bool operator<(const PassInfo& other) const {
+            return priority < other.priority;
+        }
+    };
+    
+    std::vector<PassInfo> passes_;
+};
+
+/**
  * @brief Graph Optimizer - Manages optimization passes
  * 
  * Similar to TensorRT's optimization pipeline.
@@ -44,6 +90,11 @@ protected:
  */
 class GraphOptimizer {
 public:
+    /**
+     * @brief Create optimizer with default passes from registry
+     */
+    static GraphOptimizer create_default();
+
     GraphOptimizer() = default;
     ~GraphOptimizer() = default;
 
@@ -52,6 +103,11 @@ public:
      * @param pass The optimization pass to add
      */
     void add_pass(std::shared_ptr<OptimizationPass> pass);
+
+    /**
+     * @brief Load all registered passes from registry
+     */
+    void load_default_passes();
 
     /**
      * @brief Optimize the graph
@@ -81,6 +137,23 @@ private:
     bool verbose_ = false;
     Statistics stats_;
 };
+
+/**
+ * @brief Auto-registration helper for optimization passes
+ */
+#define REGISTER_OPTIMIZATION_PASS(PassClass, Priority)                           \
+    namespace {                                                                    \
+    std::shared_ptr<mini_infer::graph::OptimizationPass> create_##PassClass() {   \
+        return std::make_shared<PassClass>();                                      \
+    }                                                                              \
+    struct PassClass##_Register {                                                  \
+        PassClass##_Register() {                                                   \
+            mini_infer::graph::OptimizationPassRegistry::instance()                \
+                .register_pass(#PassClass, create_##PassClass, Priority);          \
+        }                                                                          \
+    };                                                                             \
+    static PassClass##_Register g_##PassClass##_register;                          \
+    }
 
 } // namespace graph
 } // namespace mini_infer

@@ -18,12 +18,9 @@
 #include <vector>
 
 #include "mini_infer/core/tensor.h"
-#include "mini_infer/graph/fusion_pass.h"
 #include "mini_infer/graph/graph.h"
-#include "mini_infer/graph/graph_optimizer.h"
 #include "mini_infer/importers/onnx_parser.h"
 #include "mini_infer/runtime/engine.h"
-#include "mini_infer/runtime/memory_planner.h"
 #include "mini_infer/utils/logger.h"
 
 namespace fs = std::filesystem;
@@ -185,63 +182,37 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     }
     auto graph = std::shared_ptr<mini_infer::graph::Graph>(std::move(graph_uptr));
     MI_LOG_INFO("Model loaded successfully");
+    MI_LOG_INFO("");
 
-    // Step 2: Graph optimization
-    MI_LOG_INFO("[Step 2] Applying graph optimization...");
-    mini_infer::graph::GraphOptimizer optimizer;
-    optimizer.add_pass(std::make_shared<mini_infer::graph::FusionPass>());
-
-    auto status = optimizer.optimize(graph.get());
-    if (status == mini_infer::core::Status::SUCCESS) {
-        const auto& stats = optimizer.get_statistics();
-        MI_LOG_INFO("Graph optimization completed: " + std::to_string(stats.total_modifications) +
-                    " modification(s)");
-    } else {
-        MI_LOG_WARNING("Graph optimization failed");
-    }
-
-    // Step 3: Memory planning
-    MemoryStats mem_stats = {0, 0, 0.0f, 0};
-
-    if (enable_memory_planning) {
-        MI_LOG_INFO("[Step 3] Performing static memory planning...");
-
-        mini_infer::runtime::MemoryPlanner planner;
-        planner.set_enabled(true);
-        planner.set_verbose(true);
-        planner.set_alignment(256);
-
-        auto memory_plan = planner.plan(graph.get());
-
-        mem_stats.original_memory = memory_plan.original_memory;
-        mem_stats.optimized_memory = memory_plan.total_memory;
-        mem_stats.saving_ratio = memory_plan.memory_saving_ratio;
-        mem_stats.num_pools = static_cast<int>(memory_plan.pools.size());
-
-        MI_LOG_INFO("Memory planning completed:");
-        MI_LOG_INFO("  Original memory:  " + std::to_string(mem_stats.original_memory / 1024.0) +
-                    " KB");
-        MI_LOG_INFO("  Optimized memory: " + std::to_string(mem_stats.optimized_memory / 1024.0) +
-                    " KB");
-        MI_LOG_INFO("  Memory saving:    " + std::to_string(mem_stats.saving_ratio * 100.0f) + "%");
-        MI_LOG_INFO("  Number of pools:  " + std::to_string(mem_stats.num_pools));
-    } else {
-        MI_LOG_INFO("[Step 3] Memory planning disabled");
-    }
-
-    // Step 4: Build engine
-    MI_LOG_INFO("[Step 4] Building inference engine...");
+    // Step 2: Build engine (TensorRT-style: includes optimization and memory planning)
+    MI_LOG_INFO("[Step 2] Building inference engine...");
     mini_infer::runtime::EngineConfig config;
     config.device_type = mini_infer::core::DeviceType::CPU;
+    config.enable_graph_optimization = true;
+    config.enable_memory_planning = enable_memory_planning;
+    config.memory_alignment = 256;
+    config.enable_profiling = true;  // Enable verbose logging
+
     mini_infer::runtime::Engine engine(config);
-    status = engine.build(graph);
+    auto status = engine.build(graph);
     if (status != mini_infer::core::Status::SUCCESS) {
         MI_LOG_ERROR("Failed to build engine");
         return;
     }
-    MI_LOG_INFO("Engine built successfully");
+    MI_LOG_INFO("");
 
-    // Step 5: Get input/output names
+    // Get statistics from engine
+    const auto& memory_plan = engine.get_memory_plan();
+    
+    MemoryStats mem_stats = {0, 0, 0.0f, 0};
+    if (enable_memory_planning) {
+        mem_stats.original_memory = memory_plan.original_memory;
+        mem_stats.optimized_memory = memory_plan.total_memory;
+        mem_stats.saving_ratio = memory_plan.memory_saving_ratio;
+        mem_stats.num_pools = static_cast<int>(memory_plan.pools.size());
+    }
+
+    // Step 3: Get input/output names
     auto input_names = engine.get_input_names();
     auto output_names = engine.get_output_names();
 
@@ -260,7 +231,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
         actual_samples_dir = (fs::path(samples_dir) / "binary").string();
     }
 
-    // Step 6: Load test samples
+    // Step 4: Load test samples
     MI_LOG_INFO("[Step 6] Loading test samples from: " + actual_samples_dir);
     std::vector<std::string> sample_files;
     for (const auto& entry : fs::directory_iterator(actual_samples_dir)) {
@@ -271,7 +242,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     std::sort(sample_files.begin(), sample_files.end());
     MI_LOG_INFO("Found " + std::to_string(sample_files.size()) + " sample(s)");
 
-    // Step 7: Run inference
+    // Step 5: Run inference
     MI_LOG_INFO("[Step 7] Running inference...");
     std::vector<InferenceResult> results;
 
@@ -299,7 +270,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-    // Step 8: Calculate accuracy
+    // Step 6: Calculate accuracy
     MI_LOG_INFO("[Step 8] Computing accuracy...");
     int total_samples = 0;
     int correct_predictions = 0;
@@ -315,7 +286,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
 
     float accuracy = total_samples > 0 ? (100.0f * correct_predictions / total_samples) : 0.0f;
 
-    // Step 9: Print summary
+    // Step 7: Print summary
     MI_LOG_INFO("========================================");
     MI_LOG_INFO("Inference Summary");
     MI_LOG_INFO("========================================");
@@ -341,7 +312,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
 
     MI_LOG_INFO("========================================");
 
-    // Step 10: Save outputs if requested
+    // Step 8: Save outputs if requested
     if (save_outputs && !output_file.empty()) {
         MI_LOG_INFO("[Step 10] Saving outputs to: " + output_file);
 
