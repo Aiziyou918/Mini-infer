@@ -2,6 +2,7 @@
 set(RUNTIME_SOURCES
     engine.cpp
     memory_planner.cpp
+    optimization_profile.cpp
 )
 
 add_library(mini_infer_runtime ${RUNTIME_SOURCES})

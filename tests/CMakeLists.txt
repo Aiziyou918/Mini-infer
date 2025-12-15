@@ -7,6 +7,8 @@ set(TEST_SOURCES
     test_operators.cpp
     test_linear.cpp
     test_conv2d.cpp
+    test_shape_inference.cpp
+    test_optimization_profile.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})
