@@ -33,6 +33,19 @@ std::string Shape::to_string() const {
     return oss.str();
 }
 
+bool Shape::is_dynamic() const {
+    for (int64_t dim : dims_) {
+        if (dim < 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Shape::operator==(const Shape& other) const {
+    return dims_ == other.dims_;
+}
+
 // ============================================================================
 // Tensor implementation
 // ============================================================================

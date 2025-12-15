@@ -9,6 +9,9 @@ set(TEST_SOURCES
     test_conv2d.cpp
     test_shape_inference.cpp
     test_optimization_profile.cpp
+    test_engine_with_profile.cpp
+    test_shape_inference_engine.cpp
+    test_dynamic_shape_runtime.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

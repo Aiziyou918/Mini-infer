@@ -3,6 +3,7 @@ set(RUNTIME_SOURCES
     engine.cpp
     memory_planner.cpp
     optimization_profile.cpp
+    shape_inference_engine.cpp
 )
 
 add_library(mini_infer_runtime ${RUNTIME_SOURCES})

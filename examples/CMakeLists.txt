@@ -3,6 +3,9 @@
 set(EXAMPLE_SOURCES
     build_graph.cpp
     lenet5_inference.cpp
+    shape_inference_demo.cpp
+    dynamic_shape_basic.cpp
+    dynamic_shape_advanced.cpp
 )
 
 # ONNX examples (only if ONNX is enabled)

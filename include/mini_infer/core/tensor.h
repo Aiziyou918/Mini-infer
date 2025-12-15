@@ -64,6 +64,19 @@ public:
      * @return The string representation of the tensor shape
      */
     std::string to_string() const;
+
+    /**
+     * @brief Check if shape has dynamic dimensions (dimensions with value -1)
+     * 
+     * @return True if any dimension is -1 (dynamic), false otherwise
+     */
+    bool is_dynamic() const;
+
+    /**
+     * @brief Equality comparison
+     */
+    bool operator==(const Shape& other) const;
+    bool operator!=(const Shape& other) const { return !(*this == other); }
     
 private:
     std::vector<int64_t> dims_; ///< The dimensions of the tensor

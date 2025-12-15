@@ -3,6 +3,8 @@
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/graph/graph_optimizer.h"
 #include "mini_infer/runtime/memory_planner.h"
+#include "mini_infer/runtime/optimization_profile.h"
+#include "mini_infer/runtime/shape_inference_engine.h"
 #include "mini_infer/backends/backend.h"
 #include "mini_infer/core/types.h"
 #include <memory>
@@ -23,6 +25,10 @@ struct EngineConfig {
     bool enable_memory_planning{true};        // Enable memory planning
     size_t memory_alignment{256};             // Memory alignment (bytes)
     size_t max_workspace_size{1024 * 1024 * 1024}; // 1GB
+    
+    // Dynamic shape support
+    bool enable_dynamic_shapes{false};        // Enable dynamic shape support
+    std::shared_ptr<OptimizationProfile> optimization_profile;  // Shape ranges for inputs
 };
 
 /**
@@ -101,6 +107,7 @@ private:
     std::vector<std::shared_ptr<graph::Node>> sorted_nodes_; ///< Sorted nodes
     MemoryPlan memory_plan_; ///< Memory plan result
     graph::GraphOptimizer::Statistics optimization_stats_; ///< Optimization statistics
+    std::unique_ptr<ShapeInferenceEngine> shape_inference_engine_; ///< Runtime shape inference
     
     /**
      * @brief Apply graph optimizations (TensorRT-style)
@@ -115,6 +122,13 @@ private:
      * @return core::Status 
      */
     core::Status infer_shapes();
+    
+    /**
+     * @brief Infer shapes using optimization profile's optimal shapes
+     * 
+     * @return core::Status 
+     */
+    core::Status infer_shapes_with_profile();
 
     /**
      * @brief Plan memory allocation (TensorRT-style)
@@ -137,6 +151,26 @@ private:
      * @return core::Status 
      */
     core::Status execute_node(std::shared_ptr<graph::Node> node);
+    
+    /**
+     * @brief Check if input shapes changed and need re-inference
+     * 
+     * @param inputs Current input tensors
+     * @return True if shapes changed
+     */
+    bool check_shape_change(
+        const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs
+    );
+    
+    /**
+     * @brief Handle runtime shape change (re-infer and reallocate)
+     * 
+     * @param inputs Current input tensors
+     * @return Status
+     */
+    core::Status handle_shape_change(
+        const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs
+    );
 };
 
 } // namespace runtime
