@@ -8,6 +8,86 @@
 namespace mini_infer {
 namespace importers {
 
+namespace {
+
+core::DataType to_core_dtype(int onnx_dtype, ImporterContext& ctx, const std::string& tensor_name) {
+    using OnnxType = onnx::TensorProto_DataType;
+    switch (onnx_dtype) {
+        case OnnxType::TensorProto_DataType_FLOAT:
+            return core::DataType::FLOAT32;
+        case OnnxType::TensorProto_DataType_FLOAT16:
+            return core::DataType::FLOAT16;
+        case OnnxType::TensorProto_DataType_INT32:
+            return core::DataType::INT32;
+        case OnnxType::TensorProto_DataType_INT64:
+            return core::DataType::INT64;
+        case OnnxType::TensorProto_DataType_INT8:
+            return core::DataType::INT8;
+        case OnnxType::TensorProto_DataType_UINT8:
+            return core::DataType::UINT8;
+        case OnnxType::TensorProto_DataType_BOOL:
+            return core::DataType::BOOL;
+        default:
+            ctx.log_warning("  [" + tensor_name + "] Unsupported ONNX dtype " +
+                            std::to_string(onnx_dtype) + ", defaulting to FLOAT32");
+            return core::DataType::FLOAT32;
+    }
+}
+
+core::DataType parse_value_info_dtype(
+    const onnx::ValueInfoProto& value_info,
+    ImporterContext& ctx,
+    const std::string& tensor_name
+) {
+    if (value_info.has_type() && value_info.type().has_tensor_type()) {
+        const auto& tensor_type = value_info.type().tensor_type();
+        if (tensor_type.elem_type() != onnx::TensorProto_DataType_UNDEFINED) {
+            return to_core_dtype(tensor_type.elem_type(), ctx, tensor_name);
+        }
+    }
+    ctx.log_warning("  [" + tensor_name + "] Missing dtype, defaulting to FLOAT32");
+    return core::DataType::FLOAT32;
+}
+
+core::Shape parse_value_info_shape(
+    const onnx::ValueInfoProto& value_info,
+    ImporterContext& ctx,
+    const std::string& tensor_name
+) {
+    if (!(value_info.has_type() && value_info.type().has_tensor_type())) {
+        return core::Shape();
+    }
+
+    const auto& tensor_type = value_info.type().tensor_type();
+    if (!tensor_type.has_shape()) {
+        return core::Shape();
+    }
+
+    std::vector<int64_t> dims;
+    dims.reserve(tensor_type.shape().dim_size());
+
+    for (const auto& dim : tensor_type.shape().dim()) {
+        if (dim.has_dim_value()) {
+            dims.push_back(dim.dim_value());
+        } else {
+            // Dynamic / symbolic dimension
+            dims.push_back(-1);
+            if (dim.has_dim_param()) {
+                ctx.log_info("  [" + tensor_name + "] Dynamic dimension: " + dim.dim_param());
+            } else {
+                ctx.log_info("  [" + tensor_name + "] Dynamic dimension: <unknown>");
+            }
+        }
+    }
+
+    if (dims.empty()) {
+        return core::Shape();
+    }
+    return core::Shape(dims);
+}
+
+} // namespace
+
 ModelImporter::ModelImporter(OperatorRegistry* registry)
     : registry_(registry)
     , verbose_(false) {
@@ -89,7 +169,11 @@ core::Status ModelImporter::import_graph(
         std::vector<std::string> input_names;
         input_names.reserve(graph_proto.input_size());
         for (int i = 0; i < graph_proto.input_size(); ++i) {
-            input_names.push_back(graph_proto.input(i).name());
+            const auto& name = graph_proto.input(i).name();
+            if (ctx.is_weight(name)) {
+                continue; // Skip initializers exposed as graph inputs (TensorRT-style)
+            }
+            input_names.push_back(name);
         }
         ctx.get_graph()->set_inputs(input_names);
         
@@ -147,11 +231,22 @@ core::Status ModelImporter::import_inputs(
             continue;
         }
         
+        // Parse declared metadata (dtype + shape)
+        auto declared_shape = parse_value_info_shape(input, ctx, name);
+        auto declared_dtype = parse_value_info_dtype(input, ctx, name);
+        
         // Create placeholder tensor for input if not already registered
         if (!ctx.has_tensor(name)) {
             auto input_tensor = std::make_shared<core::Tensor>();
+            input_tensor->set_dtype(declared_dtype);
+            if (declared_shape.ndim() > 0) {
+                input_tensor->set_shape_metadata(declared_shape);
+                ctx.log_info("  Declared input: " + name + " " + declared_shape.to_string());
+            } else {
+                ctx.log_info("  Declared input: " + name + " (shape unknown)");
+            }
+            
             ctx.register_tensor(name, input_tensor);
-            ctx.log_info("  Created input placeholder: " + name);
         } else {
             ctx.log_info("  Input already registered: " + name);
         }
@@ -169,13 +264,24 @@ core::Status ModelImporter::import_outputs(
     for (int i = 0; i < graph_proto.output_size(); ++i) {
         const auto& output = graph_proto.output(i);
         const std::string& output_name = output.name();
-        ctx.log_info("  Output: " + output_name);
+        
+        auto declared_shape = parse_value_info_shape(output, ctx, output_name);
+        auto declared_dtype = parse_value_info_dtype(output, ctx, output_name);
         
         // Ensure output tensor exists
         if (!ctx.has_tensor(output_name)) {
             auto output_tensor = std::make_shared<core::Tensor>();
+            output_tensor->set_dtype(declared_dtype);
+            if (declared_shape.ndim() > 0) {
+                output_tensor->set_shape_metadata(declared_shape);
+                ctx.log_info("  Output: " + output_name + " " + declared_shape.to_string());
+            } else {
+                ctx.log_info("  Output: " + output_name + " (shape will be inferred)");
+            }
+            
             ctx.register_tensor(output_name, output_tensor);
-            ctx.log_info("  Created output tensor: " + output_name);
+        } else {
+            ctx.log_info("  Output already registered: " + output_name);
         }
         
         // Mark as graph output (store output names for later use)

@@ -159,6 +159,19 @@ public:
     static std::shared_ptr<Tensor> create(const Shape& shape, DataType dtype);
 
     /**
+     * @brief Set metadata shape without touching allocation
+     * 
+     * Allows importer to record symbolic shapes (with -1) before concrete
+     * allocations happen during build/runtime.
+     */
+    void set_shape_metadata(const Shape& shape);
+
+    /**
+     * @brief Set dtype metadata without allocating
+     */
+    void set_dtype(DataType dtype) { dtype_ = dtype; }
+
+    /**
      * @brief Get the size of the element in the tensor
      * @return The size of the element in the tensor
      */

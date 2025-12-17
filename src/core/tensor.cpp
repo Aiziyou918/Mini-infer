@@ -111,6 +111,10 @@ std::shared_ptr<Tensor> Tensor::create(const Shape& shape, DataType dtype) {
     return std::make_shared<Tensor>(shape, dtype);
 }
 
+void Tensor::set_shape_metadata(const Shape& shape) {
+    shape_ = shape;
+}
+
 } // namespace core
 } // namespace mini_infer
 

@@ -131,6 +131,14 @@ private:
     core::Status infer_shapes_with_profile();
 
     /**
+     * @brief Update tensor metadata (shape/dtype/size) post shape inference
+     * 
+     * Ensures every tensor has valid shape, dtype, and computed size_in_bytes
+     * before memory planning (TensorRT-style Step 3.5).
+     */
+    core::Status update_tensor_properties();
+
+    /**
      * @brief Plan memory allocation (TensorRT-style)
      * 
      * @return core::Status 

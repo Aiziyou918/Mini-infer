@@ -1,5 +1,6 @@
 #include "mini_infer/runtime/engine.h"
 #include "mini_infer/utils/logger.h"
+#include <algorithm>
 
 namespace mini_infer {
 namespace runtime {
@@ -25,7 +26,7 @@ core::Status Engine::build(std::shared_ptr<graph::Graph> graph) {
     if (config_.enable_graph_optimization) {
         MI_LOG_INFO("[Engine] Step 1: Applying graph optimizations...");
         auto status = optimize_graph();
-        if (status != core::Status::SUCCESS) {
+    if (status != core::Status::SUCCESS) {
             MI_LOG_WARNING("[Engine] Graph optimization failed, using original graph");
         }
     } else {
@@ -53,6 +54,14 @@ core::Status Engine::build(std::shared_ptr<graph::Graph> graph) {
     }
     if (status != core::Status::SUCCESS) {
         MI_LOG_WARNING("[Engine] Shape inference incomplete");
+    }
+    
+    // Step 3.5: Update tensor metadata (shape/dtype/size) before memory planning
+    MI_LOG_INFO("[Engine] Step 3.5: Updating tensor metadata (shape/dtype/size)...");
+    status = update_tensor_properties();
+    if (status != core::Status::SUCCESS) {
+        MI_LOG_ERROR("[Engine] Failed to update tensor metadata");
+        return status;
     }
     
     // Step 4: Memory planning (TensorRT-style static memory allocation)
@@ -102,13 +111,12 @@ core::Status Engine::optimize_graph() {
                     " modification(s)");
     }
     
-    return status;
-}
-
+        return status;
+    }
+    
 core::Status Engine::infer_shapes() {
     // TensorRT-style: Iterate through nodes in topological order and infer output shapes
     int total_inferred = 0;
-    int failed_count = 0;
     
     for (auto& node : sorted_nodes_) {
         if (!node) {
@@ -120,8 +128,14 @@ core::Status Engine::infer_shapes() {
             continue;
         }
         
-        // Collect input shapes from graph connections (data tensors)
+        // Collect input shapes (TensorRT-style: graph connections + imported tensors)
+        // Standard order: [data_from_graph, weight, bias, ...]
+        // The ONNX importer ensures this order by:
+        // 1. Graph connections (node->inputs()) provide data tensors
+        // 2. Imported tensors (node->input_tensors()) provide weights/bias
         std::vector<core::Shape> input_shapes;
+        
+        // Step 1: Collect shapes from graph connections (data tensors)
         for (const auto& input_node : node->inputs()) {
             if (input_node && !input_node->output_tensors().empty()) {
                 const auto& out_tensor = input_node->output_tensors()[0];
@@ -131,40 +145,34 @@ core::Status Engine::infer_shapes() {
             }
         }
         
-        // Merge with imported input tensors (weights/bias)
-        // For operators like Conv2D: [data, weight, bias]
-        // Graph connections provide data, imported tensors provide weight/bias
+        // Step 2: Append shapes from imported tensors (weights/bias)
+        // Note: node->input_tensors() may have nullptr entries for graph-connected inputs
+        // We only append non-null tensors that come after graph inputs
         const auto& imported_inputs = node->input_tensors();
-        if (!imported_inputs.empty()) {
-            // If we have graph inputs, they override the first entries
-            size_t graph_input_count = input_shapes.size();
-            
-            // Add shapes from imported tensors (weights, bias, etc.)
-            for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
-                if (imported_inputs[i]) {
-                    input_shapes.push_back(imported_inputs[i]->shape());
-                }
+        size_t graph_input_count = input_shapes.size();
+        
+        for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
+            if (imported_inputs[i]) {
+                input_shapes.push_back(imported_inputs[i]->shape());
             }
-            
-            // If no graph inputs but have imported inputs, use all imported
-            if (graph_input_count == 0) {
-                input_shapes.clear();
-                for (const auto& tensor : imported_inputs) {
-                    if (tensor) {
-                        input_shapes.push_back(tensor->shape());
-                    }
+        }
+        
+        // Fallback: If no graph inputs, use all imported inputs
+        // (This handles operators that don't have graph connections)
+        if (graph_input_count == 0 && !imported_inputs.empty()) {
+            input_shapes.clear();
+            for (const auto& tensor : imported_inputs) {
+                if (tensor) {
+                    input_shapes.push_back(tensor->shape());
                 }
             }
         }
         
         // Check if we have enough input shapes
         if (input_shapes.empty()) {
-            if (config_.enable_profiling) {
-                MI_LOG_WARNING("[Engine] Node " + node->name() + 
-                              " has no input shapes, skipping shape inference");
-            }
-            failed_count++;
-            continue;
+            MI_LOG_ERROR("[Engine] Node " + node->name() + 
+                        " has no input shapes, cannot infer output shape");
+            return core::Status::ERROR_RUNTIME;  // Fail fast: stop on first error
         }
         
         // Infer output shapes
@@ -172,17 +180,16 @@ core::Status Engine::infer_shapes() {
         auto status = node->get_operator()->infer_shape(input_shapes, output_shapes);
         
         if (status != core::Status::SUCCESS) {
-            MI_LOG_WARNING("[Engine] Failed to infer shape for node: " + node->name());
-            failed_count++;
-            continue;
+            MI_LOG_ERROR("[Engine] Failed to infer shape for node: " + node->name() + 
+                        " (status=" + std::to_string(static_cast<int>(status)) + ")");
+            return status;  // Fail fast: stop on first error
         }
         
         // Validate output shapes
         if (output_shapes.empty()) {
-            MI_LOG_WARNING("[Engine] Node " + node->name() + 
-                          " produced empty output shapes");
-            failed_count++;
-            continue;
+            MI_LOG_ERROR("[Engine] Node " + node->name() + 
+                        " produced empty output shapes");
+            return core::Status::ERROR_RUNTIME;  // Fail fast: stop on first error
         }
         
         // Create output tensors if needed and set their shapes
@@ -193,24 +200,21 @@ core::Status Engine::infer_shapes() {
             output_tensors.push_back(std::make_shared<core::Tensor>());
         }
         
-        // Update output tensors with inferred shapes
+        // Update output tensors with inferred shapes (TensorRT-style: metadata only)
         for (size_t i = 0; i < output_shapes.size() && i < output_tensors.size(); ++i) {
-            // Create new tensor with inferred shape (don't allocate data yet)
-            // Note: reshape() doesn't work on empty tensors, so we create new ones
-            auto new_tensor = std::make_shared<core::Tensor>();
+            // Use lightweight metadata setter instead of creating new tensor
+            if (!output_tensors[i]) {
+                output_tensors[i] = std::make_shared<core::Tensor>();
+            }
             
-            // Manually set shape by creating a dummy tensor then extracting shape
-            // This is a workaround since Tensor doesn't have a direct set_shape method
-            if (output_shapes[i].numel() > 0) {
-                // For now, just create a properly shaped tensor without allocating
-                // We'll allocate in allocate_tensors() step
-                auto temp = std::make_shared<core::Tensor>(
-                    output_shapes[i], 
-                    core::DataType::FLOAT32
-                );
-                output_tensors[i] = temp;
-            } else {
-                output_tensors[i] = new_tensor;
+            // Set shape metadata without allocating (allocation happens in allocate_tensors)
+            output_tensors[i]->set_shape_metadata(output_shapes[i]);
+            
+            // Ensure dtype is set (default to FLOAT32 if not set)
+            if (output_tensors[i]->dtype() == core::DataType::FLOAT32 && 
+                !node->input_tensors().empty() && node->input_tensors()[0]) {
+                // Inherit dtype from first input if available
+                output_tensors[i]->set_dtype(node->input_tensors()[0]->dtype());
             }
             
             total_inferred++;
@@ -223,8 +227,7 @@ core::Status Engine::infer_shapes() {
     }
     
     MI_LOG_INFO("[Engine] Shape inference completed: " + 
-                std::to_string(total_inferred) + " tensor(s) inferred, " +
-                std::to_string(failed_count) + " failed");
+                std::to_string(total_inferred) + " tensor(s) inferred");
     
     return core::Status::SUCCESS;
 }
@@ -280,6 +283,124 @@ core::Status Engine::infer_shapes_with_profile() {
     
     // Now perform normal shape inference (will use the optimal input shapes)
     return infer_shapes();
+}
+
+core::Status Engine::update_tensor_properties() {
+    if (!graph_) {
+        MI_LOG_ERROR("[Engine] Graph is null");
+        return core::Status::ERROR_RUNTIME;
+    }
+
+    size_t updated_count = 0;
+
+    for (const auto& node : sorted_nodes_) {
+        if (!node) {
+            continue;
+        }
+
+        auto& outputs = node->output_tensors();
+        for (size_t idx = 0; idx < outputs.size(); ++idx) {
+            auto& tensor = outputs[idx];
+            if (!tensor) {
+                continue;
+            }
+
+            const auto& shape = tensor->shape();
+            if (shape.ndim() == 0) {
+                MI_LOG_ERROR("[Engine] Tensor '" + node->name() + "' output[" +
+                             std::to_string(idx) + "] has undefined shape");
+                return core::Status::ERROR_RUNTIME;
+            }
+
+            bool has_dynamic_dim = false;
+            for (size_t d = 0; d < shape.ndim(); ++d) {
+                if (shape[d] < 0) {
+                    has_dynamic_dim = true;
+                    break;
+                }
+            }
+
+            if (has_dynamic_dim) {
+                if (config_.enable_dynamic_shapes) {
+                    MI_LOG_ERROR("[Engine] Tensor '" + node->name() + "' output[" +
+                                 std::to_string(idx) + "] still has dynamic dimensions " +
+                                 "after shape inference. Provide an OptimizationProfile " +
+                                 "or disable dynamic shapes.");
+                    return core::Status::ERROR_INVALID_ARGUMENT;
+                }
+
+                // Static build: fallback to batch=1 (TensorRT-like default)
+                std::vector<int64_t> concrete_dims(shape.dims().begin(), shape.dims().end());
+                for (auto& dim : concrete_dims) {
+                    if (dim < 0) {
+                        dim = 1;
+                    }
+                }
+
+                tensor->set_shape_metadata(core::Shape(concrete_dims));
+                if (config_.enable_profiling) {
+                    MI_LOG_WARNING("[Engine] Tensor '" + node->name() + "' output[" +
+                                   std::to_string(idx) +
+                                   "] had dynamic dimensions; defaulting to batch=1 shape " +
+                                   tensor->shape().to_string());
+                }
+            }
+
+            auto inherit_dtype_from_tensor =
+                [&tensor](const std::shared_ptr<core::Tensor>& src) -> bool {
+                    if (!src) return false;
+                    tensor->set_dtype(src->dtype());
+                    return true;
+                };
+
+            // If dtype still default (FLOAT32) try to inherit from inputs (graph or imported)
+            if (tensor->dtype() == core::DataType::FLOAT32) {
+                bool dtype_set = false;
+                for (const auto& input_node : node->inputs()) {
+                    if (input_node && !input_node->output_tensors().empty()) {
+                        dtype_set = inherit_dtype_from_tensor(input_node->output_tensors()[0]);
+                        if (dtype_set) break;
+                    }
+                }
+                if (!dtype_set) {
+                    for (const auto& imported : node->input_tensors()) {
+                        if (inherit_dtype_from_tensor(imported)) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            const int64_t numel = tensor->shape().numel();
+            if (numel <= 0) {
+                MI_LOG_ERROR("[Engine] Tensor '" + node->name() + "' output[" +
+                             std::to_string(idx) + "] has invalid numel=" +
+                             std::to_string(numel));
+                return core::Status::ERROR_RUNTIME;
+            }
+
+            const size_t size_bytes = tensor->size_in_bytes();
+            if (size_bytes == 0 && numel > 0) {
+                MI_LOG_ERROR("[Engine] Tensor '" + node->name() + "' output[" +
+                             std::to_string(idx) + "] size_in_bytes()=0 (shape=" +
+                             tensor->shape().to_string() + ")");
+                return core::Status::ERROR_RUNTIME;
+            }
+
+            updated_count++;
+
+            if (config_.enable_profiling) {
+                MI_LOG_INFO("[Engine] Tensor '" + node->name() + "' output[" +
+                            std::to_string(idx) + "]: shape=" + shape.to_string() +
+                            ", dtype=" + std::to_string(static_cast<int>(tensor->dtype())) +
+                            ", size=" + std::to_string(size_bytes) + " bytes");
+            }
+        }
+    }
+
+    MI_LOG_INFO("[Engine] Updated metadata for " + std::to_string(updated_count) +
+                " tensor(s)");
+    return core::Status::SUCCESS;
 }
 
 core::Status Engine::plan_memory() {
