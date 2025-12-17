@@ -3,8 +3,6 @@
 set(EXAMPLE_SOURCES
     build_graph.cpp
     lenet5_inference.cpp
-    shape_inference_demo.cpp
-    dynamic_shape_basic.cpp
     dynamic_shape_advanced.cpp
 )
 
@@ -14,6 +12,7 @@ if(MINI_INFER_ENABLE_ONNX)
     list(APPEND EXAMPLE_SOURCES lenet5_onnx_test.cpp)
     list(APPEND EXAMPLE_SOURCES lenet5_optimized_inference.cpp)
     list(APPEND EXAMPLE_SOURCES lenet5_optimized_with_memory_planning.cpp)
+    list(APPEND EXAMPLE_SOURCES lenet5_dynamic_multi_batch.cpp)
 endif()
 
 foreach(example_src ${EXAMPLE_SOURCES})
@@ -36,10 +35,10 @@ foreach(example_src ${EXAMPLE_SOURCES})
         if(example_name STREQUAL "onnx_parser_example" OR 
            example_name STREQUAL "lenet5_onnx_test" OR
            example_name STREQUAL "lenet5_optimized_inference" OR
-           example_name STREQUAL "lenet5_optimized_with_memory_planning")
+           example_name STREQUAL "lenet5_optimized_with_memory_planning" OR
+           example_name STREQUAL "lenet5_dynamic_multi_batch")
             target_link_libraries(${example_name} PRIVATE mini_infer_importers)
         endif()
         
     endif()
 endforeach()
-

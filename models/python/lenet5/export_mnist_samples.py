@@ -132,17 +132,18 @@ def export_sample(raw_img, norm_tensor, label, idx, output_dir, formats):
         'shape': [1, 28, 28],
         'files': {}
     }
+    base_name = f'sample_{idx:04d}_label_{label}'
     
     # Export as PNG
     if 'png' in formats:
-        png_path = output_dir / 'images' / f'sample_{idx:04d}_label_{label}.png'
+        png_path = output_dir / 'images' / f'{base_name}.png'
         png_path.parent.mkdir(parents=True, exist_ok=True)
         raw_img.save(png_path)
         metadata['files']['png'] = str(png_path.relative_to(output_dir))
     
     # Export normalized tensor as binary
     if 'binary' in formats:
-        bin_path = output_dir / 'binary' / f'sample_{idx:04d}.bin'
+        bin_path = output_dir / 'binary' / f'{base_name}.bin'
         bin_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Convert to numpy and save
@@ -162,7 +163,7 @@ def export_sample(raw_img, norm_tensor, label, idx, output_dir, formats):
     
     # Export raw tensor as numpy
     if 'npy' in formats:
-        npy_path = output_dir / 'numpy' / f'sample_{idx:04d}.npy'
+        npy_path = output_dir / 'numpy' / f'{base_name}.npy'
         npy_path.parent.mkdir(parents=True, exist_ok=True)
         np.save(npy_path, norm_tensor.numpy())
         metadata['files']['npy'] = str(npy_path.relative_to(output_dir))

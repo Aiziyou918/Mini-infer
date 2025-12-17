@@ -225,6 +225,21 @@ test_lenet5.bat
 ./test_lenet5.sh
 ```
 
+### 动态多批次测试（lenet5_dynamic_multi_batch）
+被添加的 test_lenet5_dynamic_multi_batch.ps1|.bat|.sh 将自动检查 ONNX 模型和样本是否准备好，如未准备则会使用 export_lenet5.py 以及 export_mnist_samples.py 再生产。脚本默认会分类平衡地导出多于 lenet5_dynamic_multi_batch 例子所需的测试样本（包括 _label_ 名称），以防止多批处理重用数据。
+
+```powershell
+# Windows PowerShell
+cd models\python\lenet5
+.\test_lenet5_dynamic_multi_batch.ps1
+
+# Windows CMD
+test_lenet5_dynamic_multi_batch.bat
+
+# Linux/Mac
+./test_lenet5_dynamic_multi_batch.sh
+```
+
 **功能说明：**
 1. 生成 PyTorch 参考输出（logits + 概率）
 2. 运行 C++ Mini-Infer 推理
