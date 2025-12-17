@@ -106,6 +106,7 @@ private:
     std::shared_ptr<backends::Backend> backend_; ///< Backend
     std::vector<std::shared_ptr<graph::Node>> sorted_nodes_; ///< Sorted nodes
     MemoryPlan memory_plan_; ///< Memory plan result
+    std::vector<std::shared_ptr<void>> memory_pool_buffers_; ///< Allocated memory pools (TensorRT-style)
     graph::GraphOptimizer::Statistics optimization_stats_; ///< Optimization statistics
     std::unique_ptr<ShapeInferenceEngine> shape_inference_engine_; ///< Runtime shape inference
     
@@ -179,8 +180,18 @@ private:
     core::Status handle_shape_change(
         const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs
     );
+
+    // Allocation helpers (TensorRT-style static memory reuse)
+    core::Status prepare_memory_pools(bool use_memory_pools);
+    core::Status allocate_node_outputs(std::shared_ptr<graph::Node> node, bool use_memory_pools,
+                                       int& allocated_count, int& skipped_count,
+                                       int& failed_count);
+    enum class PoolBindResult { kNotTried, kBound, kFailed };
+    PoolBindResult try_bind_tensor_to_pool(const std::string& tensor_name, size_t output_index,
+                                           std::shared_ptr<core::Tensor>& tensor,
+                                           bool use_memory_pools, int& allocated_count,
+                                           int& failed_count);
 };
 
 } // namespace runtime
 } // namespace mini_infer
-

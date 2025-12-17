@@ -1,6 +1,8 @@
 #include "mini_infer/runtime/engine.h"
 #include "mini_infer/utils/logger.h"
+#include "mini_infer/core/allocator.h"
 #include <algorithm>
+#include <cstring>
 
 namespace mini_infer {
 namespace runtime {
@@ -534,83 +536,197 @@ std::string Engine::get_profiling_info() const {
 }
 
 core::Status Engine::allocate_tensors() {
-    // Allocate tensors for nodes based on inferred shapes
-    // If memory planning is enabled, tensors will be allocated from memory pools
-    // Otherwise, allocate independently
-    
     int allocated_count = 0;
     int skipped_count = 0;
     int failed_count = 0;
-    
+
+    const bool use_memory_pools =
+        config_.enable_memory_planning && !memory_plan_.pools.empty();
+
+    auto status = prepare_memory_pools(use_memory_pools);
+    if (status != core::Status::SUCCESS) {
+        return status;
+    }
+
     for (auto& node : sorted_nodes_) {
-        if (!node) continue;
-        
-        auto& output_tensors = node->output_tensors();
-        for (size_t i = 0; i < output_tensors.size(); ++i) {
-            auto& tensor = output_tensors[i];
-            if (!tensor) {
-                if (config_.enable_profiling) {
-                    MI_LOG_WARNING("[Engine] Node " + node->name() + " output[" + 
-                                  std::to_string(i) + "] is null");
-                }
-                failed_count++;
-                continue;
-            }
-            
-            // Skip if already allocated (e.g., weights, shared tensors)
-            if (!tensor->empty()) {
-                skipped_count++;
-                continue;
-            }
-            
-            // Validate shape before allocation
-            const auto& shape = tensor->shape();
-            if (shape.ndim() == 0) {
-                if (config_.enable_profiling) {
-                    MI_LOG_WARNING("[Engine] Node " + node->name() + " output[" + 
-                                  std::to_string(i) + "] has empty shape, skipping allocation");
-                }
-                failed_count++;
-                continue;
-            }
-            
-            if (shape.numel() <= 0) {
-                MI_LOG_ERROR("[Engine] Node " + node->name() + " output[" + 
-                            std::to_string(i) + "] has invalid shape: " + shape.to_string());
-                failed_count++;
-                continue;
-            }
-            
-            // Allocate based on shape
-            // For now, allocate independently
-            // TODO: Use memory pools from memory_plan_
-            try {
-                *tensor = core::Tensor(shape, tensor->dtype());
-                allocated_count++;
-                
-                if (config_.enable_profiling) {
-                    MI_LOG_INFO("[Engine] Allocated tensor for " + node->name() + 
-                               " output[" + std::to_string(i) + "]: " + shape.to_string() +
-                               " (" + std::to_string(tensor->size_in_bytes() / 1024.0) + " KB)");
-                }
-            } catch (const std::exception& e) {
-                MI_LOG_ERROR("[Engine] Failed to allocate tensor for " + node->name() + 
-                            " output[" + std::to_string(i) + "]: " + e.what());
-                failed_count++;
-            }
+        status = allocate_node_outputs(node, use_memory_pools, allocated_count, skipped_count,
+                                       failed_count);
+        if (status != core::Status::SUCCESS) {
+            return status;
         }
     }
-    
-    MI_LOG_INFO("[Engine] Tensor allocation completed: " + 
+
+    MI_LOG_INFO("[Engine] Tensor allocation completed: " +
                 std::to_string(allocated_count) + " allocated, " +
                 std::to_string(skipped_count) + " skipped, " +
                 std::to_string(failed_count) + " failed");
-    
+
     if (failed_count > 0) {
         MI_LOG_WARNING("[Engine] Some tensors failed to allocate, inference may fail");
     }
-    
+
     return core::Status::SUCCESS;
+}
+
+core::Status Engine::prepare_memory_pools(bool use_memory_pools) {
+    memory_pool_buffers_.clear();
+
+    if (!use_memory_pools) {
+        if (config_.enable_memory_planning && config_.enable_profiling) {
+            MI_LOG_WARNING("[Engine] Memory planning enabled but no pools available; "
+                           "falling back to per-tensor allocations");
+        }
+        return core::Status::SUCCESS;
+    }
+
+    memory_pool_buffers_.reserve(memory_plan_.pools.size());
+    for (const auto& pool : memory_plan_.pools) {
+        void* raw = nullptr;
+        if (pool.size_bytes > 0) {
+            raw = core::CPUAllocator::get_instance()->allocate(pool.size_bytes);
+        }
+
+        if (!raw && pool.size_bytes > 0) {
+            MI_LOG_ERROR("[Engine] Failed to allocate memory pool " +
+                         std::to_string(pool.pool_id) + " of size " +
+                         std::to_string(pool.size_bytes) + " bytes");
+            return core::Status::ERROR_RUNTIME;
+        }
+
+        if (raw) {
+            std::memset(raw, 0, pool.size_bytes);
+        }
+
+        memory_pool_buffers_.emplace_back(
+            raw, [](void* p) { core::CPUAllocator::get_instance()->deallocate(p); });
+
+        if (config_.enable_profiling) {
+            MI_LOG_INFO("[Engine] Created memory pool " + std::to_string(pool.pool_id) +
+                       " (" + std::to_string(pool.size_bytes / 1024.0) + " KB)");
+        }
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::allocate_node_outputs(std::shared_ptr<graph::Node> node,
+                                           bool use_memory_pools, int& allocated_count,
+                                           int& skipped_count, int& failed_count) {
+    if (!node) return core::Status::SUCCESS;
+
+    auto& output_tensors = node->output_tensors();
+    for (size_t i = 0; i < output_tensors.size(); ++i) {
+        auto& tensor = output_tensors[i];
+        if (!tensor) {
+            if (config_.enable_profiling) {
+                MI_LOG_WARNING("[Engine] Node " + node->name() + " output[" +
+                               std::to_string(i) + "] is null");
+            }
+            failed_count++;
+            continue;
+        }
+
+        if (!tensor->empty()) {
+            skipped_count++;
+            continue;
+        }
+
+        const auto& shape = tensor->shape();
+        if (shape.ndim() == 0) {
+            if (config_.enable_profiling) {
+                MI_LOG_WARNING("[Engine] Node " + node->name() + " output[" +
+                               std::to_string(i) + "] has empty shape, skipping allocation");
+            }
+            failed_count++;
+            continue;
+        }
+
+        if (shape.numel() <= 0) {
+            MI_LOG_ERROR("[Engine] Node " + node->name() + " output[" +
+                        std::to_string(i) + "] has invalid shape: " + shape.to_string());
+            failed_count++;
+            continue;
+        }
+
+        const auto bind_result =
+            try_bind_tensor_to_pool(node->name(), i, tensor, use_memory_pools,
+                                    allocated_count, failed_count);
+        if (bind_result == PoolBindResult::kBound) {
+            continue;
+        }
+        if (bind_result == PoolBindResult::kFailed) {
+            continue;
+        }
+
+        try {
+            *tensor = core::Tensor(shape, tensor->dtype());
+            allocated_count++;
+
+            if (config_.enable_profiling) {
+                MI_LOG_INFO("[Engine] Allocated tensor for " + node->name() +
+                           " output[" + std::to_string(i) + "]: " + shape.to_string() +
+                           " (" + std::to_string(tensor->size_in_bytes() / 1024.0) + " KB)");
+            }
+        } catch (const std::exception& e) {
+            MI_LOG_ERROR("[Engine] Failed to allocate tensor for " + node->name() +
+                        " output[" + std::to_string(i) + "]: " + e.what());
+            failed_count++;
+        }
+    }
+
+    return core::Status::SUCCESS;
+}
+
+Engine::PoolBindResult Engine::try_bind_tensor_to_pool(
+    const std::string& tensor_name, size_t output_index, std::shared_ptr<core::Tensor>& tensor,
+    bool use_memory_pools, int& allocated_count, int& failed_count) {
+    if (!use_memory_pools) {
+        return PoolBindResult::kNotTried;
+    }
+
+    const auto plan_it = memory_plan_.tensor_to_pool.find(tensor_name);
+    if (plan_it == memory_plan_.tensor_to_pool.end()) {
+        return PoolBindResult::kNotTried;
+    }
+
+    int pool_id = plan_it->second;
+    const bool valid_pool =
+        pool_id >= 0 &&
+        static_cast<size_t>(pool_id) < memory_pool_buffers_.size() &&
+        static_cast<size_t>(pool_id) < memory_plan_.pools.size() &&
+        memory_pool_buffers_[pool_id] != nullptr;
+
+    if (!valid_pool) {
+        MI_LOG_WARNING("[Engine] Memory plan pool unavailable for tensor " + tensor_name +
+                       ", falling back to independent allocation");
+        return PoolBindResult::kNotTried;
+    }
+
+    const size_t required = tensor->size_in_bytes();
+    const size_t pool_size = memory_plan_.pools[static_cast<size_t>(pool_id)].size_bytes;
+
+    if (required > pool_size) {
+        MI_LOG_ERROR("[Engine] Tensor " + tensor_name + " output[" +
+                     std::to_string(output_index) + "] requires " +
+                     std::to_string(required) + " bytes, but pool " +
+                     std::to_string(pool_id) + " size is " +
+                     std::to_string(pool_size));
+        failed_count++;
+        return PoolBindResult::kFailed;
+    }
+
+    tensor->bind_external_data(memory_pool_buffers_[pool_id]);
+    allocated_count++;
+
+    if (config_.enable_profiling) {
+        MI_LOG_INFO("[Engine] Bound tensor for " + tensor_name + " output[" +
+                   std::to_string(output_index) + "] to pool " +
+                   std::to_string(pool_id) + " (" +
+                   std::to_string(required / 1024.0) + " KB, pool size " +
+                   std::to_string(pool_size / 1024.0) + " KB)");
+    }
+
+    return PoolBindResult::kBound;
 }
 
 core::Status Engine::execute_node(std::shared_ptr<graph::Node> node) {
@@ -725,4 +841,3 @@ core::Status Engine::handle_shape_change(
 
 } // namespace runtime
 } // namespace mini_infer
-

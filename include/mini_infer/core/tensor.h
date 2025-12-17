@@ -159,6 +159,14 @@ public:
     static std::shared_ptr<Tensor> create(const Shape& shape, DataType dtype);
 
     /**
+     * @brief Bind an externally allocated buffer to this tensor.
+     *
+     * Used by the runtime memory planner to let multiple tensors share
+     * the same preallocated memory pool.
+     */
+    void bind_external_data(const std::shared_ptr<void>& data);
+
+    /**
      * @brief Set metadata shape without touching allocation
      * 
      * Allows importer to record symbolic shapes (with -1) before concrete
@@ -191,4 +199,3 @@ private:
 
 } // namespace core
 } // namespace mini_infer
-
