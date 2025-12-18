@@ -25,56 +25,18 @@ core::Status Reshape::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Get target shape
-    std::vector<int64_t> target_shape = param_.shape;
-
-    // If shape is provided as second input (ONNX style), use it
-    if (inputs.size() >= 2 && inputs[1]) {
-        const auto& shape_tensor = inputs[1];
-
-        // Shape tensor should be 1D int64
-        if (shape_tensor->dtype() != core::DataType::INT64 || shape_tensor->shape().ndim() != 1) {
-            return core::Status::ERROR_INVALID_ARGUMENT;
-        }
-
-        // Extract shape values
-        const int64_t* shape_data = static_cast<const int64_t*>(shape_tensor->data());
-        size_t shape_size = static_cast<size_t>(shape_tensor->shape()[0]);
-        target_shape.assign(shape_data, shape_data + shape_size);
-    }
-
-    if (target_shape.empty()) {
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
+    auto output = outputs[0];
 
-    // Resolve shape (handle -1)
-    const auto& input_shape = input->shape();
-    int64_t total_elements = input_shape.numel();
-
-    std::vector<int64_t> resolved_shape;
-    auto status = resolve_shape(target_shape, total_elements, resolved_shape);
-    if (status != core::Status::SUCCESS) {
-        return status;
+    // Reshape is a view operation - just copy data if not sharing memory
+    // In static graph mode, Engine may allocate separate buffers
+    if (input->data() != output->data()) {
+        // Need to copy data
+        std::memcpy(output->data(), input->data(), input->size_in_bytes());
     }
-
-    // Create output shape
-    core::Shape output_shape(resolved_shape);
-
-    // Validate total elements match
-    if (output_shape.numel() != total_elements) {
-        return core::Status::ERROR_INVALID_ARGUMENT;
-    }
-
-    // Reshape is just a view change - create a view with different shape
-    // This is a ZERO-COPY operation (shares the same underlying data)
-    auto output = input->view(output_shape);
-    if (!output) {
-        return core::Status::ERROR_INVALID_ARGUMENT;
-    }
-
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
 
     return core::Status::SUCCESS;
 }

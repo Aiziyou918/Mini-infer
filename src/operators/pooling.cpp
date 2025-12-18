@@ -51,20 +51,20 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     int H_in = input_shape[2];
     int W_in = input_shape[3];
 
-    // Calculate output dimensions
-    int H_out = (H_in + 2 * param_.padding_h - param_.kernel_h) / param_.stride_h + 1;
-    int W_out = (W_in + 2 * param_.padding_w - param_.kernel_w) / param_.stride_w + 1;
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    auto output = outputs[0];
 
-    if (H_out <= 0 || W_out <= 0) {
+    // Extract output dimensions from pre-allocated tensor
+    const auto& output_shape = output->shape();
+    if (output_shape.ndim() != 4) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Create output tensor
-    core::Shape output_shape({N, C, H_out, W_out});
-    auto output = core::Tensor::create(output_shape, input->dtype());
-    if (!output) {
-        return core::Status::ERROR_OUT_OF_MEMORY;
-    }
+    int H_out = static_cast<int>(output_shape[2]);
+    int W_out = static_cast<int>(output_shape[3]);
 
     // Perform computation based on data type
     const auto dtype = input->dtype();
@@ -110,10 +110,6 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     } else {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
 
     return core::Status::SUCCESS;
 }

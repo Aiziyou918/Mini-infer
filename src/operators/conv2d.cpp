@@ -47,43 +47,35 @@ core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Extract dimensions
+    // Extract input dimensions
     int N = static_cast<int>(input_shape[0]);
     int C_in = static_cast<int>(input_shape[1]);
     int H_in = static_cast<int>(input_shape[2]);
     int W_in = static_cast<int>(input_shape[3]);
 
-    int C_out = static_cast<int>(weight_shape[0]);
-    int C_in_per_group = static_cast<int>(weight_shape[1]);
     int kernel_h = static_cast<int>(weight_shape[2]);
     int kernel_w = static_cast<int>(weight_shape[3]);
 
     // Validate parameters
-    // TODO: Groups convolution not yet implemented, only groups=1 supported
     if (param_.groups != 1) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }
-    if (C_in != C_in_per_group * param_.groups) {
+
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    auto output = outputs[0];
+
+    // Extract output dimensions from pre-allocated tensor
+    const auto& output_shape = output->shape();
+    if (output_shape.ndim() != 4) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Calculate output dimensions
-    int H_out =
-        (H_in + 2 * param_.padding_h - param_.dilation_h * (kernel_h - 1) - 1) / param_.stride_h +
-        1;
-    int W_out =
-        (W_in + 2 * param_.padding_w - param_.dilation_w * (kernel_w - 1) - 1) / param_.stride_w +
-        1;
-
-    // Create output tensor
-    std::vector<int64_t> output_dims = {static_cast<int64_t>(N), static_cast<int64_t>(C_out),
-                                        static_cast<int64_t>(H_out), static_cast<int64_t>(W_out)};
-    core::Shape output_shape(output_dims);
-
-    auto output = core::Tensor::create(output_shape, input->dtype());
-    if (!output) {
-        return core::Status::ERROR_OUT_OF_MEMORY;
-    }
+    int C_out = static_cast<int>(output_shape[1]);
+    int H_out = static_cast<int>(output_shape[2]);
+    int W_out = static_cast<int>(output_shape[3]);
 
     // Perform computation based on data type
     const auto dtype = input->dtype();
@@ -147,10 +139,6 @@ core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
     } else {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
 
     return core::Status::SUCCESS;
 }

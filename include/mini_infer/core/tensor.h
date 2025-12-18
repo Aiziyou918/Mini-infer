@@ -1,9 +1,9 @@
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <string>
 #include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace mini_infer {
 namespace core {
@@ -12,40 +12,42 @@ namespace core {
  * @brief Data Type Enumeration
  */
 enum class DataType {
-    FLOAT32, ///< 32-bit floating point
-    FLOAT16, ///< 16-bit floating point
-    INT32, ///< 32-bit integer
-    INT64, ///< 64-bit integer
-    INT8, ///< 8-bit integer
-    UINT8, ///< 8-bit unsigned integer
-    BOOL, ///< Boolean
+    FLOAT32,  ///< 32-bit floating point
+    FLOAT16,  ///< 16-bit floating point
+    INT32,    ///< 32-bit integer
+    INT64,    ///< 64-bit integer
+    INT8,     ///< 8-bit integer
+    UINT8,    ///< 8-bit unsigned integer
+    BOOL,     ///< Boolean
 };
 
 /**
  * @brief Tensor Shape Class
  */
 class Shape {
-public:
+   public:
     Shape() = default;
     explicit Shape(const std::vector<int64_t>& dims);
-    
+
     /**
      * @brief Get the dimension at the given index
-     * 
+     *
      * @param index The index of the dimension
      * @return The dimension at the given index
      */
     int64_t operator[](size_t index) const;
-    
+
     /**
      * @brief Get the number of dimensions of the tensor
      * @return The number of dimensions of the tensor
      */
-    size_t ndim() const { return dims_.size(); }
+    size_t ndim() const {
+        return dims_.size();
+    }
 
     /**
      * @brief Get the number of elements in the tensor
-     * 
+     *
      * @return The number of elements in the tensor
      */
     int64_t numel() const;
@@ -54,20 +56,22 @@ public:
      * @brief Get the dimensions of the tensor
      * @return The dimensions of the tensor
      */
-    const std::vector<int64_t>& dims() const { return dims_; }
+    const std::vector<int64_t>& dims() const {
+        return dims_;
+    }
 
     /**
      * @brief Convert the tensor shape to a string
-     * 
+     *
      * vector<int64_t> {dim1, dim2, dim3} --> string "[dim1, dim2, dim3]"
-     * 
+     *
      * @return The string representation of the tensor shape
      */
     std::string to_string() const;
 
     /**
      * @brief Check if shape has dynamic dimensions (dimensions with value -1)
-     * 
+     *
      * @return True if any dimension is -1 (dynamic), false otherwise
      */
     bool is_dynamic() const;
@@ -76,71 +80,101 @@ public:
      * @brief Equality comparison
      */
     bool operator==(const Shape& other) const;
-    bool operator!=(const Shape& other) const { return !(*this == other); }
-    
-private:
-    std::vector<int64_t> dims_; ///< The dimensions of the tensor
+    bool operator!=(const Shape& other) const {
+        return !(*this == other);
+    }
+
+   private:
+    std::vector<int64_t> dims_;  ///< The dimensions of the tensor
 };
 
 /**
  * @brief Tensor Class - The basic data structure of the inference framework
  */
 class Tensor {
-public:
+   public:
     Tensor() = default;
     Tensor(const Shape& shape, DataType dtype);
     ~Tensor() = default;
-    
+
     // Disable copy, allow move
     Tensor(const Tensor&) = delete;
     Tensor& operator=(const Tensor&) = delete;
     Tensor(Tensor&&) noexcept = default;
     Tensor& operator=(Tensor&&) noexcept = default;
-    
+
     // Accessors
     /**
      * @brief Get the shape of the tensor
      * @return The shape of the tensor
      */
-    const Shape& shape() const { return shape_; }
+    const Shape& shape() const {
+        return shape_;
+    }
 
     /**
      * @brief Get the data type of the tensor
      * @return The data type of the tensor
      */
-    DataType dtype() const { return dtype_; }
+    DataType dtype() const {
+        return dtype_;
+    }
 
     /**
      * @brief Get the data of the tensor
      * @return The data of the tensor
      */
-    void* data() { return data_.get(); }
+    void* data() {
+        return data_.get();
+    }
 
     /**
      * @brief Get the data of the tensor
      * @return The data of the tensor
      */
-    const void* data() const { return data_.get(); }
+    const void* data() const {
+        return data_.get();
+    }
 
     /**
      * @brief Get the size of the tensor in bytes
-     * 
+     *
      * @return The size of the tensor in bytes
      */
     size_t size_in_bytes() const;
-    
+
     // Utility methods
     /**
      * @brief Check if the tensor is empty
      * @return True if the tensor is empty, false otherwise
      */
-    bool empty() const { return data_ == nullptr; }
+    bool empty() const {
+        return data_ == nullptr;
+    }
 
     /**
      * @brief Reshape the tensor in-place
      * @param new_shape The new shape of the tensor
      */
     void reshape(const Shape& new_shape);
+
+    /**
+     * @brief Resize the tensor with new shape (may reallocate memory)
+     * @param new_shape The new shape of the tensor
+     *
+     * Smart reallocation strategy:
+     * - If new size <= capacity: reuse buffer, only update shape
+     * - If new size > capacity: reallocate buffer and update capacity
+     */
+    void resize(const Shape& new_shape);
+
+    /**
+     * @brief Get the capacity (allocated buffer size) in bytes
+     * @return The capacity in bytes
+     */
+    size_t capacity() const {
+        return capacity_;
+    }
 
     /**
      * @brief Create a view of the tensor with a different shape (zero-copy)
@@ -168,7 +202,7 @@ public:
 
     /**
      * @brief Set metadata shape without touching allocation
-     * 
+     *
      * Allows importer to record symbolic shapes (with -1) before concrete
      * allocations happen during build/runtime.
      */
@@ -177,19 +211,22 @@ public:
     /**
      * @brief Set dtype metadata without allocating
      */
-    void set_dtype(DataType dtype) { dtype_ = dtype; }
+    void set_dtype(DataType dtype) {
+        dtype_ = dtype;
+    }
 
     /**
      * @brief Get the size of the element in the tensor
      * @return The size of the element in the tensor
      */
     size_t element_size() const;
-    
-private:
-    Shape shape_; ///< The shape of the tensor
-    DataType dtype_{DataType::FLOAT32}; ///< The data type of the tensor
-    std::shared_ptr<void> data_; ///< The data of the tensor
-    
+
+   private:
+    Shape shape_;                        ///< The shape of the tensor
+    DataType dtype_{DataType::FLOAT32};  ///< The data type of the tensor
+    std::shared_ptr<void> data_;         ///< The data of the tensor
+    size_t capacity_{0};                 ///< Allocated buffer size in bytes
+
     /**
      * @brief Allocate the memory for the tensor
      * @return The size of the tensor in bytes
@@ -197,5 +234,5 @@ private:
     void allocate();
 };
 
-} // namespace core
-} // namespace mini_infer
+}  // namespace core
+}  // namespace mini_infer

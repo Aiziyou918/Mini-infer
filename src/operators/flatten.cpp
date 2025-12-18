@@ -21,28 +21,18 @@ core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Get input information
-    const auto& input_shape = input->shape();
-    const auto input_dtype = input->dtype();
-
-    // Calculate output shape
-    std::vector<core::Shape> input_shapes = {input_shape};
-    std::vector<core::Shape> output_shapes;
-    auto status = infer_shape(input_shapes, output_shapes);
-    if (status != core::Status::SUCCESS) {
-        return status;
-    }
-
-    // Flatten is just a view change - create a view with different shape
-    // This is a ZERO-COPY operation! (shares the same underlying data)
-    auto output = input->view(output_shapes[0]);
-    if (!output) {
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
+    auto output = outputs[0];
 
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
+    // Flatten is a view operation - just copy data if not sharing memory
+    // In static graph mode, Engine may allocate separate buffers
+    if (input->data() != output->data()) {
+        // Need to copy data
+        std::memcpy(output->data(), input->data(), input->size_in_bytes());
+    }
 
     return core::Status::SUCCESS;
 }

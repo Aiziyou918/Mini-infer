@@ -152,6 +152,15 @@ public:
      * @return Map of input name to optimal shape
      */
     std::map<std::string, core::Shape> get_optimal_shapes() const;
+
+    /**
+    * @brief Get the optimal shapes for all inputs
+    *
+    * Used during Engine::build() for optimization.
+    *
+    * @return Map of input name to optimal shape
+    */
+    std::map<std::string, core::Shape> get_max_shapes() const;
     
     /**
      * @brief Check if profile is empty

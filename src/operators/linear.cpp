@@ -50,7 +50,6 @@ core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         batch_size *= static_cast<int>(input_shape[i]);
     }
     int in_features = static_cast<int>(input_shape[input_shape.ndim() - 1]);
-    int out_features = static_cast<int>(weight_shape[0]);
     int weight_in_features = static_cast<int>(weight_shape[1]);
 
     // Validate feature dimensions match
@@ -58,26 +57,25 @@ core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    auto output = outputs[0];
+
+    // Extract output dimensions from pre-allocated tensor
+    const auto& output_shape = output->shape();
+    if (output_shape.ndim() < 2) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    int out_features = static_cast<int>(output_shape[output_shape.ndim() - 1]);
+
     // Update parameters if not set
     if (param_.in_features == 0) {
         param_.in_features = in_features;
     }
     if (param_.out_features == 0) {
         param_.out_features = out_features;
-    }
-
-    // Create output shape: replace last dimension with out_features
-    std::vector<int64_t> output_dims;
-    for (size_t i = 0; i < input_shape.ndim() - 1; ++i) {
-        output_dims.push_back(input_shape[i]);
-    }
-    output_dims.push_back(static_cast<int64_t>(out_features));
-    core::Shape output_shape(output_dims);
-
-    // Create output tensor
-    auto output = core::Tensor::create(output_shape, input->dtype());
-    if (!output) {
-        return core::Status::ERROR_OUT_OF_MEMORY;
     }
 
     // Perform computation based on data type
@@ -128,10 +126,6 @@ core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
     } else {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
 
     return core::Status::SUCCESS;
 }

@@ -26,10 +26,16 @@ core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inp
     const auto& input_shape = input->shape();
     const auto input_dtype = input->dtype();
 
-    // Create output tensor (same shape and type as input)
-    auto output = core::Tensor::create(input_shape, input_dtype);
-    if (!output) {
-        return core::Status::ERROR_OUT_OF_MEMORY;
+    // Get pre-allocated output tensor (Engine already did shape inference)
+    if (outputs.empty() || !outputs[0]) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    auto output = outputs[0];
+
+    // Validate output shape matches input
+    const auto& output_shape = output->shape();
+    if (output_shape != input_shape) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
     // Calculate total number of elements
@@ -54,10 +60,6 @@ core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inp
         // Unsupported data type
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-
-    // Set output
-    outputs.clear();
-    outputs.push_back(output);
 
     return core::Status::SUCCESS;
 }

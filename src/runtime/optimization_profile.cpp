@@ -144,12 +144,21 @@ std::vector<std::string> OptimizationProfile::get_input_names() const {
 
 std::map<std::string, core::Shape> OptimizationProfile::get_optimal_shapes() const {
     std::map<std::string, core::Shape> optimal_shapes;
-    
+
     for (const auto& [name, range] : shape_ranges_) {
         optimal_shapes[name] = range.opt;
     }
-    
+
     return optimal_shapes;
+}
+std::map<std::string, core::Shape> OptimizationProfile::get_max_shapes() const {
+    std::map<std::string, core::Shape> max_shapes;
+
+    for (const auto& [name, range] : shape_ranges_) {
+        max_shapes[name] = range.max;
+    }
+
+    return max_shapes;
 }
 
 std::string OptimizationProfile::to_string() const {
