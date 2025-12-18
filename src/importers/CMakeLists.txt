@@ -30,7 +30,7 @@ add_library(mini_infer_importers STATIC ${IMPORTERS_SOURCES})
 target_link_libraries(mini_infer_importers
     PUBLIC
         mini_infer_core
-        mini_infer_graph
+        mini_infer_graph_all
         mini_infer_operators
         mini_infer_utils
         protobuf::libprotobuf

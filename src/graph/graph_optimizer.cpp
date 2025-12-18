@@ -54,7 +54,7 @@ bool OptimizationPassRegistry::has_pass(const std::string& name) const {
 // GraphOptimizer Implementation
 // ============================================================================
 
-GraphOptimizer GraphOptimizer::create_default() {
+GraphOptimizer GraphOptimizer:: create_default() {
     GraphOptimizer optimizer;
     optimizer.load_default_passes();
     return optimizer;

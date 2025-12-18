@@ -6,7 +6,6 @@ set(KERNEL_SOURCES
     cpu/bias_cpu.cpp
     cpu/transpose_cpu.cpp
     cpu/pooling_cpu.cpp
-    kernel_registry.cpp
 )
 
 add_library(mini_infer_kernels STATIC ${KERNEL_SOURCES})
@@ -21,6 +20,19 @@ target_link_libraries(mini_infer_kernels
     PUBLIC
         mini_infer_core
 )
+
+# Interface alias to keep kernel registry TU linked in static builds
+add_library(mini_infer_kernels_all INTERFACE)
+target_link_libraries(mini_infer_kernels_all
+    INTERFACE
+        $<$<OR:$<BOOL:${BUILD_SHARED_LIBS}>,$<BOOL:${MSVC}>>:mini_infer_kernels>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--whole-archive>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:mini_infer_kernels>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--no-whole-archive>
+)
+if (NOT BUILD_SHARED_LIBS AND MSVC)
+    target_link_options(mini_infer_kernels_all INTERFACE "/WHOLEARCHIVE:mini_infer_kernels")
+endif()
 
 # Future: Add CUDA kernels conditionally
 # if(USE_CUDA)
@@ -44,4 +56,8 @@ install(TARGETS mini_infer_kernels
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(TARGETS mini_infer_kernels_all
+    EXPORT Mini-InferTargets
 )

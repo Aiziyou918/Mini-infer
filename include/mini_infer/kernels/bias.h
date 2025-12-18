@@ -2,7 +2,6 @@
 
 #include "mini_infer/kernels/kernel_types.h"
 #include "mini_infer/kernels/kernel_base.h"
-#include "mini_infer/kernels/kernel_registry.h"
 #include "mini_infer/kernels/kernel_registry_template.h"
 #include <stdexcept>
 
@@ -60,9 +59,6 @@ public:
         int spatial_size,
         KernelBackend backend = KernelBackend::AUTO
     ) {
-        // Ensure kernels are initialized
-        KernelRegistryInitializer::initialize();
-        
         BiasFunc<T> func = nullptr;
         
         // Get kernel from registry

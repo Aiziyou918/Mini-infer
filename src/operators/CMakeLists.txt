@@ -20,7 +20,7 @@ target_include_directories(mini_infer_operators
 target_link_libraries(mini_infer_operators
     PUBLIC
         mini_infer_core
-        mini_infer_kernels
+        mini_infer_kernels_all
         mini_infer_backends
 )
 
@@ -38,4 +38,3 @@ install(TARGETS mini_infer_operators
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-

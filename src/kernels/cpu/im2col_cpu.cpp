@@ -84,6 +84,13 @@ void register_im2col_kernels() {
     );
 }
 
+namespace {
+struct Im2ColKernelsAutoRegister {
+    Im2ColKernelsAutoRegister() { register_im2col_kernels(); }
+};
+static Im2ColKernelsAutoRegister g_im2col_kernels_auto_register;
+}  // namespace
+
 } // namespace cpu
 
 } // namespace kernels

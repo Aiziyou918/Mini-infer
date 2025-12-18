@@ -2,7 +2,6 @@
 
 #include "mini_infer/kernels/kernel_types.h"
 #include "mini_infer/kernels/kernel_base.h"
-#include "mini_infer/kernels/kernel_registry.h"
 #include "mini_infer/kernels/kernel_registry_template.h"
 #include <stdexcept>
 
@@ -71,9 +70,6 @@ public:
         int K,
         KernelBackend backend = KernelBackend::AUTO
     ) {
-        // Ensure kernels are initialized
-        KernelRegistryInitializer::initialize();
-        
         GEMMFunc_NN<T> func = nullptr;
         
         // Get kernel from registry
@@ -111,9 +107,6 @@ public:
         int K,
         KernelBackend backend = KernelBackend::AUTO
     ) {
-        // Ensure kernels are initialized
-        KernelRegistryInitializer::initialize();
-        
         GEMMFunc_NT<T> func = nullptr;
         
         // Get kernel from registry

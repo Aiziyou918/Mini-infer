@@ -123,6 +123,13 @@ void register_gemm_kernels() {
     );
 }
 
+namespace {
+struct GemmKernelsAutoRegister {
+    GemmKernelsAutoRegister() { register_gemm_kernels(); }
+};
+static GemmKernelsAutoRegister g_gemm_kernels_auto_register;
+}  // namespace
+
 } // namespace cpu
 
 } // namespace kernels

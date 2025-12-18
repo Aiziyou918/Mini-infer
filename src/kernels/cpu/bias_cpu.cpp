@@ -62,6 +62,13 @@ void register_bias_kernels() {
     );
 }
 
+namespace {
+struct BiasKernelsAutoRegister {
+    BiasKernelsAutoRegister() { register_bias_kernels(); }
+};
+static BiasKernelsAutoRegister g_bias_kernels_auto_register;
+}  // namespace
+
 } // namespace cpu
 
 } // namespace kernels

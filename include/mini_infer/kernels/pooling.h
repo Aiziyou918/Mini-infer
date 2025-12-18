@@ -2,7 +2,6 @@
 
 #include "mini_infer/kernels/kernel_types.h"
 #include "mini_infer/kernels/kernel_base.h"
-#include "mini_infer/kernels/kernel_registry.h"
 #include "mini_infer/kernels/kernel_registry_template.h"
 #include <stdexcept>
 
@@ -126,9 +125,6 @@ public:
         int padding_w,
         KernelBackend backend = KernelBackend::AUTO
     ) {
-        // Ensure kernels are initialized
-        KernelRegistryInitializer::initialize();
-        
         MaxPool2DFunc<T> func = nullptr;
         
         // Get kernel from registry
@@ -174,9 +170,6 @@ public:
         int padding_w,
         KernelBackend backend = KernelBackend::AUTO
     ) {
-        // Ensure kernels are initialized
-        KernelRegistryInitializer::initialize();
-        
         AvgPool2DFunc<T> func = nullptr;
         
         // Get kernel from registry

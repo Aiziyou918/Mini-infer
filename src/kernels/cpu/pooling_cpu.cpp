@@ -165,5 +165,12 @@ void register_pooling_kernels() {
     );
 }
 
+namespace {
+struct PoolingKernelsAutoRegister {
+    PoolingKernelsAutoRegister() { register_pooling_kernels(); }
+};
+static PoolingKernelsAutoRegister g_pooling_kernels_auto_register;
+}  // namespace
+
 } // namespace kernels
 } // namespace mini_infer

@@ -20,6 +20,19 @@ target_link_libraries(mini_infer_graph
         mini_infer_operators
 )
 
+# Interface target that keeps graph passes even in static builds
+add_library(mini_infer_graph_all INTERFACE)
+target_link_libraries(mini_infer_graph_all
+    INTERFACE
+        $<$<OR:$<BOOL:${BUILD_SHARED_LIBS}>,$<BOOL:${MSVC}>>:mini_infer_graph>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--whole-archive>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:mini_infer_graph>
+        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--no-whole-archive>
+)
+if (NOT BUILD_SHARED_LIBS AND MSVC)
+    target_link_options(mini_infer_graph_all INTERFACE "/WHOLEARCHIVE:mini_infer_graph")
+endif()
+
 # Set library properties
 set_target_properties(mini_infer_graph PROPERTIES
     VERSION ${PROJECT_VERSION}
@@ -35,3 +48,6 @@ install(TARGETS mini_infer_graph
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+install(TARGETS mini_infer_graph_all
+    EXPORT Mini-InferTargets
+)

@@ -81,6 +81,13 @@ void register_transpose_kernels() {
     );
 }
 
+namespace {
+struct TransposeKernelsAutoRegister {
+    TransposeKernelsAutoRegister() { register_transpose_kernels(); }
+};
+static TransposeKernelsAutoRegister g_transpose_kernels_auto_register;
+}  // namespace
+
 } // namespace cpu
 
 } // namespace kernels

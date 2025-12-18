@@ -25,7 +25,7 @@ foreach(example_src ${EXAMPLE_SOURCES})
             mini_infer_core
             mini_infer_backends
             mini_infer_operators
-            mini_infer_graph
+            mini_infer_graph_all
             mini_infer_runtime
             mini_infer_utils
     )
