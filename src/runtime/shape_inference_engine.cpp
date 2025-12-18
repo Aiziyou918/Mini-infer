@@ -1,12 +1,11 @@
 #include "mini_infer/runtime/shape_inference_engine.h"
+
 #include "mini_infer/utils/logger.h"
 
 namespace mini_infer {
 namespace runtime {
 
-ShapeInferenceEngine::ShapeInferenceEngine(std::shared_ptr<graph::Graph> graph)
-    : graph_(graph) {
-}
+ShapeInferenceEngine::ShapeInferenceEngine(std::shared_ptr<graph::Graph> graph) : graph_(graph) {}
 
 core::Status ShapeInferenceEngine::ensure_sorted() {
     if (sorted_nodes_.empty()) {
@@ -20,14 +19,13 @@ core::Status ShapeInferenceEngine::ensure_sorted() {
 }
 
 core::Status ShapeInferenceEngine::infer_shapes(
-    const std::unordered_map<std::string, core::Shape>& input_shapes
-) {
+    const std::unordered_map<std::string, core::Shape>& input_shapes) {
     // Ensure graph is sorted
     auto status = ensure_sorted();
     if (status != core::Status::SUCCESS) {
         return status;
     }
-    
+
     if (verbose_) {
         MI_LOG_INFO("[ShapeInferenceEngine] Starting runtime shape inference...");
         MI_LOG_INFO("[ShapeInferenceEngine] Input shapes:");
@@ -35,55 +33,59 @@ core::Status ShapeInferenceEngine::infer_shapes(
             MI_LOG_INFO("[ShapeInferenceEngine]   " + name + ": " + shape.to_string());
         }
     }
-    
-    // Clear previous results
+
+    // Resize storage to fit all nodes
     inferred_shapes_.clear();
-    
-    // Store input shapes
+    inferred_shapes_.resize(sorted_nodes_.size());
+
+    // Store input shapes (by node ID)
     for (const auto& [name, shape] : input_shapes) {
-        inferred_shapes_[name] = shape;
+        auto node = graph_->get_node(name);
+        if (node) {
+            size_t node_id = node->id();
+            if (node_id < inferred_shapes_.size()) {
+                inferred_shapes_[node_id] = {shape};  // Input nodes have single output
+            }
+        }
     }
-    
+
     int total_inferred = 0;
-    
+
     // Iterate through nodes in topological order
     for (auto& node : sorted_nodes_) {
         auto op = node->get_operator();
         if (!op) {
             continue;  // Skip nodes without operators (e.g., input nodes)
         }
-        
-        // Collect input shapes (TensorRT-style: graph connections + imported tensors)
-        // Standard order: [data_from_graph, weight, bias, ...]
+
+        // Collect input shapes using node IDs (O(1) lookup)
         std::vector<core::Shape> input_shapes_vec;
         bool all_inputs_ready = true;
-        
+
         // Step 1: Collect shapes from graph connections (data tensors)
-        // These shapes come from previously inferred nodes in topological order
         const auto& input_nodes = node->inputs();
         for (const auto& input_node : input_nodes) {
-            auto it = inferred_shapes_.find(input_node->name());
-            if (it != inferred_shapes_.end()) {
-                input_shapes_vec.push_back(it->second);
+            size_t input_id = input_node->id();
+            if (input_id < inferred_shapes_.size() && !inferred_shapes_[input_id].empty()) {
+                // For multi-output nodes, we currently take the first output
+                // TODO: Support explicit output index in graph connections
+                input_shapes_vec.push_back(inferred_shapes_[input_id][0]);
             } else {
-                // Input shape not yet inferred - this should not happen in topological order
                 all_inputs_ready = false;
                 break;
             }
         }
-        
+
         // Step 2: Append shapes from imported tensors (weights/bias)
-        // Note: node->input_tensors() may have nullptr entries for graph-connected inputs
-        // We only append non-null tensors that come after graph inputs
         const auto& imported_tensors = node->input_tensors();
         size_t graph_input_count = input_shapes_vec.size();
-        
+
         for (size_t i = graph_input_count; i < imported_tensors.size(); ++i) {
             if (imported_tensors[i]) {
                 input_shapes_vec.push_back(imported_tensors[i]->shape());
             }
         }
-        
+
         // Fallback: If no graph inputs, use all imported inputs
         if (graph_input_count == 0 && !imported_tensors.empty()) {
             input_shapes_vec.clear();
@@ -93,115 +95,114 @@ core::Status ShapeInferenceEngine::infer_shapes(
                 }
             }
         }
-        
+
         if (!all_inputs_ready) {
-            MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() + 
-                        "': Not all inputs ready for shape inference");
-            return core::Status::ERROR_RUNTIME;  // Fail fast: stop on first error
+            MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() +
+                         "': Not all inputs ready for shape inference");
+            return core::Status::ERROR_RUNTIME;
         }
-        
-        // Infer output shape
+
+        // Infer output shapes
         std::vector<core::Shape> output_shapes;
         auto infer_status = op->infer_shape(input_shapes_vec, output_shapes);
-        
+
         if (infer_status != core::Status::SUCCESS || output_shapes.empty()) {
-            MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() + 
-                        "': Shape inference failed (status=" + 
-                        std::to_string(static_cast<int>(infer_status)) + ")");
-            return core::Status::ERROR_RUNTIME;  // Fail fast: stop on first error
+            MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() +
+                         "': Shape inference failed (status=" +
+                         std::to_string(static_cast<int>(infer_status)) + ")");
+            return core::Status::ERROR_RUNTIME;
         }
-        
-        // Store inferred shapes (use node name as key)
-        for (size_t i = 0; i < output_shapes.size(); ++i) {
-            std::string tensor_name = node->name();
-            if (output_shapes.size() > 1) {
-                tensor_name += "_output_" + std::to_string(i);
-            }
-            inferred_shapes_[tensor_name] = output_shapes[i];
+
+        // Store inferred shapes using node ID (O(1) write)
+        size_t node_id = node->id();
+        if (node_id < inferred_shapes_.size()) {
+            inferred_shapes_[node_id] = output_shapes;
         }
-        
+
         total_inferred++;
-        
+
         if (verbose_) {
-            MI_LOG_INFO("[ShapeInferenceEngine] Node '" + node->name() + 
-                       "': " + output_shapes[0].to_string());
+            MI_LOG_INFO("[ShapeInferenceEngine] Node '" + node->name() +
+                        "': " + output_shapes[0].to_string());
         }
     }
-    
+
     // Cache input shapes for comparison
     last_input_shapes_ = input_shapes;
-    
+
     if (verbose_) {
-        MI_LOG_INFO("[ShapeInferenceEngine] Shape inference completed: " + 
-                   std::to_string(total_inferred) + " node(s) inferred");
+        MI_LOG_INFO("[ShapeInferenceEngine] Shape inference completed: " +
+                    std::to_string(total_inferred) + " node(s) inferred");
     }
-    
+
     return core::Status::SUCCESS;
 }
 
-const core::Shape* ShapeInferenceEngine::get_inferred_shape(
-    const std::string& tensor_name
-) const {
-    auto it = inferred_shapes_.find(tensor_name);
-    if (it == inferred_shapes_.end()) {
+const core::Shape* ShapeInferenceEngine::get_inferred_shape(const std::string& tensor_name) const {
+    // Find node by name (only used during shape change handling, not hot path)
+    auto node = graph_->get_node(tensor_name);
+    if (!node) {
         return nullptr;
     }
-    return &it->second;
+
+    size_t node_id = node->id();
+    if (node_id >= inferred_shapes_.size() || inferred_shapes_[node_id].empty()) {
+        return nullptr;
+    }
+
+    // Return first output shape (for single-output nodes)
+    // TODO: Support explicit output index for multi-output nodes
+    return &inferred_shapes_[node_id][0];
 }
 
 bool ShapeInferenceEngine::shapes_changed(
-    const std::unordered_map<std::string, core::Shape>& input_shapes
-) const {
+    const std::unordered_map<std::string, core::Shape>& input_shapes) const {
     // Check if number of inputs changed
     if (input_shapes.size() != last_input_shapes_.size()) {
         return true;
     }
-    
+
     // Check each input shape
     for (const auto& [name, shape] : input_shapes) {
         auto it = last_input_shapes_.find(name);
         if (it == last_input_shapes_.end()) {
             return true;  // New input
         }
-        
+
         if (it->second != shape) {
             return true;  // Shape changed
         }
     }
-    
+
     return false;
 }
 
 std::vector<std::string> ShapeInferenceEngine::get_tensors_needing_reallocation() const {
     std::vector<std::string> tensors_to_reallocate;
-    
+
     // Check all nodes in the graph
     for (const auto& node : sorted_nodes_) {
+        size_t node_id = node->id();
+        if (node_id >= inferred_shapes_.size() || inferred_shapes_[node_id].empty()) {
+            continue;
+        }
+
         // Check output tensors
         const auto& outputs = node->output_tensors();
-        for (size_t i = 0; i < outputs.size(); ++i) {
+        const auto& inferred_outputs = inferred_shapes_[node_id];
+
+        for (size_t i = 0; i < outputs.size() && i < inferred_outputs.size(); ++i) {
             if (!outputs[i]) {
                 continue;
             }
-            
-            std::string tensor_name = node->name();
-            if (outputs.size() > 1) {
-                tensor_name += "_output_" + std::to_string(i);
-            }
-            
-            // Get inferred shape
-            auto inferred_shape = get_inferred_shape(tensor_name);
-            if (!inferred_shape) {
-                continue;
-            }
-            
-            // Compare with current tensor shape
-            if (outputs[i]->shape() != *inferred_shape) {
-                tensors_to_reallocate.push_back(tensor_name);
+
+            // Compare with inferred shape (direct access via node ID)
+            if (outputs[i]->shape() != inferred_outputs[i]) {
+                tensors_to_reallocate.push_back(node->name());
             }
         }
     }
-    
+
     return tensors_to_reallocate;
 }
 
@@ -210,6 +211,5 @@ void ShapeInferenceEngine::clear_cache() {
     last_input_shapes_.clear();
 }
 
-} // namespace runtime
-} // namespace mini_infer
-
+}  // namespace runtime
+}  // namespace mini_infer

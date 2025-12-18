@@ -46,6 +46,15 @@ core::Status Engine::build(std::shared_ptr<graph::Graph> graph) {
     MI_LOG_INFO("[Engine] Topological sort completed: " + std::to_string(sorted_nodes_.size()) +
                 " nodes");
 
+    // Step 2.5: Assign unique IDs to nodes for fast runtime indexing
+    MI_LOG_INFO("[Engine] Step 2.5: Assigning node IDs...");
+    for (size_t i = 0; i < sorted_nodes_.size(); ++i) {
+        if (sorted_nodes_[i]) {
+            sorted_nodes_[i]->set_id(i);
+        }
+    }
+    MI_LOG_INFO("[Engine] Node ID assignment completed");
+
     // Step 3: Shape inference
     MI_LOG_INFO("[Engine] Step 3: Inferring tensor shapes...");
     if (config_.enable_dynamic_shapes && config_.optimization_profile) {

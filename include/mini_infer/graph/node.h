@@ -141,16 +141,33 @@ class Node {
      */
     const char* type_name() const;
 
+    /**
+     * @brief Get node ID (assigned during graph build)
+     * @return Unique node ID for fast indexing
+     */
+    size_t id() const {
+        return node_id_;
+    }
+
+    /**
+     * @brief Set node ID (called by Graph during build)
+     * @param id Unique node ID
+     */
+    void set_id(size_t id) {
+        node_id_ = id;
+    }
+
    private:
-    std::string name_;                         //< The name of the node
-    std::shared_ptr<operators::Operator> op_;  //< The operator of the node
-    core::OpType cached_op_type_;              //< Cached operator type for fast access
+    std::string name_;                         ///< The name of the node
+    std::shared_ptr<operators::Operator> op_;  ///< The operator of the node
+    core::OpType cached_op_type_;              ///< Cached operator type for fast access
+    size_t node_id_{0};                        ///< Unique node ID for fast indexing
 
-    std::vector<std::shared_ptr<Node>> input_nodes_;   //< The input nodes of the node
-    std::vector<std::shared_ptr<Node>> output_nodes_;  //< The output nodes of the node
+    std::vector<std::shared_ptr<Node>> input_nodes_;   ///< The input nodes of the node
+    std::vector<std::shared_ptr<Node>> output_nodes_;  ///< The output nodes of the node
 
-    std::vector<std::shared_ptr<core::Tensor>> input_tensors_;   //< The input tensors of the node
-    std::vector<std::shared_ptr<core::Tensor>> output_tensors_;  //< The output tensors of the node
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors_;   ///< The input tensors of the node
+    std::vector<std::shared_ptr<core::Tensor>> output_tensors_;  ///< The output tensors of the node
 };
 
 }  // namespace graph
