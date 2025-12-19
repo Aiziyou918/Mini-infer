@@ -289,8 +289,8 @@ core::Status InferencePlan::infer_shapes() {
         }
     }
 
-    MI_LOG_INFO("[InferencePlan] Shape inference completed: " +
-                std::to_string(total_inferred) + " tensor(s) inferred");
+    MI_LOG_INFO("[InferencePlan] Shape inference completed: " + std::to_string(total_inferred) +
+                " tensor(s) inferred");
 
     return core::Status::SUCCESS;
 }
@@ -301,19 +301,20 @@ core::Status InferencePlan::infer_shapes_with_profile() {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    auto max_shapes = config_.optimization_profile->get_max_shapes();
+    // TensorRT-style: Use optimal shapes for build-time inference
+    auto opt_shapes = config_.optimization_profile->get_optimal_shapes();
 
     if (config_.enable_profiling) {
-        MI_LOG_INFO("[InferencePlan] Using max profile with optimal shapes:");
-        for (const auto& [name, shape] : max_shapes) {
+        MI_LOG_INFO("[InferencePlan] Using profile with optimal shapes:");
+        for (const auto& [name, shape] : opt_shapes) {
             MI_LOG_INFO("[InferencePlan]   " + name + ": " + shape.to_string());
         }
     }
 
     for (const auto& input_name : graph_->inputs()) {
-        auto it = max_shapes.find(input_name);
-        if (it == max_shapes.end()) {
-            MI_LOG_WARNING("[InferencePlan] No max shape for input '" + input_name + "'");
+        auto it = opt_shapes.find(input_name);
+        if (it == opt_shapes.end()) {
+            MI_LOG_WARNING("[InferencePlan] No optimal shape for input '" + input_name + "'");
             continue;
         }
 
@@ -323,8 +324,8 @@ core::Status InferencePlan::infer_shapes_with_profile() {
                 auto tensor = std::make_shared<core::Tensor>(it->second, core::DataType::FLOAT32);
                 node->set_output_tensors({tensor});
             } else {
-                auto tensor = std::make_shared<core::Tensor>(it->second,
-                                                            node->output_tensors()[0]->dtype());
+                auto tensor =
+                    std::make_shared<core::Tensor>(it->second, node->output_tensors()[0]->dtype());
                 node->set_output_tensors({tensor});
             }
 
@@ -434,8 +435,8 @@ core::Status InferencePlan::update_tensor_properties() {
             const size_t size_bytes = tensor->size_in_bytes();
             if (size_bytes == 0 && numel > 0) {
                 MI_LOG_ERROR("[InferencePlan] Tensor '" + node->name() + "' output[" +
-                             std::to_string(idx) + "] size_in_bytes()=0 (shape=" +
-                             tensor->shape().to_string() + ")");
+                             std::to_string(idx) +
+                             "] size_in_bytes()=0 (shape=" + tensor->shape().to_string() + ")");
                 return core::Status::ERROR_RUNTIME;
             }
 
@@ -475,8 +476,7 @@ core::Status InferencePlan::plan_memory() {
                 std::to_string(memory_plan_.total_memory / 1024.0) + " KB");
     MI_LOG_INFO("[InferencePlan]   Memory saving:    " +
                 std::to_string(memory_plan_.memory_saving_ratio * 100.0f) + "%");
-    MI_LOG_INFO("[InferencePlan]   Number of pools:  " +
-                std::to_string(memory_plan_.pools.size()));
+    MI_LOG_INFO("[InferencePlan]   Number of pools:  " + std::to_string(memory_plan_.pools.size()));
 
     return core::Status::SUCCESS;
 }
@@ -571,8 +571,7 @@ core::Status InferencePlan::bind_ordered_inputs(
         }
 
         if (binding.node_id >= ctx->node_outputs_.size()) {
-            MI_LOG_ERROR("[InferencePlan] Input binding node id out of range for: " +
-                         binding.name);
+            MI_LOG_ERROR("[InferencePlan] Input binding node id out of range for: " + binding.name);
             return core::Status::ERROR_RUNTIME;
         }
 
@@ -581,27 +580,32 @@ core::Status InferencePlan::bind_ordered_inputs(
             outputs.resize(1);
         }
 
-        if (!binding.node->output_tensors().empty() && binding.node->output_tensors()[0]) {
-            const auto& expected_shape = binding.node->output_tensors()[0]->shape();
-            const auto& actual_shape = tensor->shape();
+        // Skip strict shape validation when dynamic shapes are enabled
+        // Shape validation is handled by the optimization profile in handle_shape_change()
+        if (!config_.enable_dynamic_shapes) {
+            if (!binding.node->output_tensors().empty() && binding.node->output_tensors()[0]) {
+                const auto& expected_shape = binding.node->output_tensors()[0]->shape();
+                const auto& actual_shape = tensor->shape();
 
-            if (expected_shape.ndim() > 0 && expected_shape.ndim() == actual_shape.ndim()) {
-                bool compatible = true;
-                for (size_t i = 0; i < expected_shape.ndim(); ++i) {
-                    if (expected_shape[i] < 0 || i == 0)
-                        continue;
+                if (expected_shape.ndim() > 0 && expected_shape.ndim() == actual_shape.ndim()) {
+                    bool compatible = true;
+                    for (size_t i = 0; i < expected_shape.ndim(); ++i) {
+                        if (expected_shape[i] < 0 || i == 0)
+                            continue;
 
-                    if (expected_shape[i] != actual_shape[i]) {
-                        MI_LOG_ERROR("[InferencePlan] Input '" + binding.name +
-                                     "' shape mismatch: expected " + expected_shape.to_string() +
-                                     ", got " + actual_shape.to_string());
-                        compatible = false;
-                        break;
+                        if (expected_shape[i] != actual_shape[i]) {
+                            MI_LOG_ERROR("[InferencePlan] Input '" + binding.name +
+                                         "' shape mismatch: expected " +
+                                         expected_shape.to_string() + ", got " +
+                                         actual_shape.to_string());
+                            compatible = false;
+                            break;
+                        }
                     }
-                }
 
-                if (!compatible) {
-                    return core::Status::ERROR_INVALID_ARGUMENT;
+                    if (!compatible) {
+                        return core::Status::ERROR_INVALID_ARGUMENT;
+                    }
                 }
             }
         }

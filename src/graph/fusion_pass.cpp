@@ -47,6 +47,26 @@ core::Status FusionPass::apply(Graph* graph, int& num_modifications) {
         // Future: kGEMM, kMATMUL fusions
     }
 
+    // Phase 1.5: Update graph outputs if any deleted node was an output
+    auto outputs = graph->outputs();
+    bool outputs_changed = false;
+    for (auto& output_name : outputs) {
+        if (nodes_to_delete.count(output_name) > 0) {
+            // Find the node that will be deleted and get its predecessor
+            auto node = graph->get_node(output_name);
+            if (node && !node->inputs().empty()) {
+                auto& input_edge = node->inputs()[0];
+                if (input_edge.node) {
+                    output_name = input_edge.node->name();
+                    outputs_changed = true;
+                }
+            }
+        }
+    }
+    if (outputs_changed) {
+        graph->set_outputs(outputs);
+    }
+
     // Phase 2: Sweep - Batch deletion
     for (const auto& node_name : nodes_to_delete) {
         graph->remove_node(node_name);
@@ -112,8 +132,7 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
         consumer_inputs.erase(std::remove_if(consumer_inputs.begin(), consumer_inputs.end(),
                                              [&](const Node::Edge& e) {
                                                  return e.node &&
-                                                        e.node->name() ==
-                                                            activation_node->name();
+                                                        e.node->name() == activation_node->name();
                                              }),
                               consumer_inputs.end());
 
@@ -136,8 +155,8 @@ std::shared_ptr<mini_infer::graph::OptimizationPass> create_FusionPass() {
 }
 struct FusionPass_Register {
     FusionPass_Register() {
-        mini_infer::graph::OptimizationPassRegistry::instance()
-            .register_pass("FusionPass", create_FusionPass, 100);
+        mini_infer::graph::OptimizationPassRegistry::instance().register_pass(
+            "FusionPass", create_FusionPass, 100);
     }
 };
 static FusionPass_Register g_FusionPass_register;

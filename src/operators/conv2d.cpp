@@ -135,7 +135,7 @@ core::Status Conv2D::infer_shape(const std::vector<core::Shape>& input_shapes,
 }
 
 // Register Conv2D operator
-REGISTER_OPERATOR(Conv2D, Conv2D);
+REGISTER_OPERATOR(Conv, Conv2D);
 
 }  // namespace operators
 }  // namespace mini_infer

@@ -11,6 +11,11 @@ set(TEST_SOURCES
     test_engine_with_profile.cpp
     test_shape_inference_engine.cpp
     test_dynamic_shape_runtime.cpp
+    test_softmax.cpp
+    test_pooling.cpp
+    test_flatten.cpp
+    test_reshape.cpp
+    test_kernel_registry.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

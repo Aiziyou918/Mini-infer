@@ -44,8 +44,8 @@ core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inp
     ctx.outputs = &outputs;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kRELU, input->device(),
-                                                           input_dtype);
+    auto kernel =
+        kernels::KernelRegistry::instance().find(core::OpType::kRELU, input->device(), input_dtype);
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }
@@ -70,7 +70,7 @@ core::Status ReLU::infer_shape(const std::vector<core::Shape>& input_shapes,
 }
 
 // Register ReLU operator
-REGISTER_OPERATOR(ReLU, ReLU);
+REGISTER_OPERATOR(Relu, ReLU);
 
 }  // namespace operators
 }  // namespace mini_infer
