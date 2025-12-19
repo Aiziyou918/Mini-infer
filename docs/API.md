@@ -1,277 +1,158 @@
-# Mini-Infer API 文档
+# Mini-Infer API 文档 (API Reference)
 
 ## Core 模块
 
 ### Tensor
 
-张量是 Mini-Infer 中的基础数据结构。
+张量是 Mini-Infer 中的核心数据结构，采用了 View 机制，支持零拷贝操作。
 
-#### 创建张量
-
+#### 1. 创建张量
 ```cpp
-// 方式1：使用静态工厂方法
+// 方式1：创建新的 Tensor（分配内存）
 core::Shape shape({1, 3, 224, 224});
 auto tensor = core::Tensor::create(shape, core::DataType::FLOAT32);
 
-// 方式2：直接构造
-core::Tensor tensor(shape, core::DataType::FLOAT32);
+// 方式2：绑定外部内存（Zero-Copy）
+float* external_buffer = ...;
+auto tensor_view = core::Tensor::create(shape, core::DataType::FLOAT32);
+tensor_view->bind_external_data(external_buffer, size_in_bytes);
 ```
 
-#### 访问张量数据
-
+#### 2. 张量操作
 ```cpp
-// 获取可变数据指针
-void* data = tensor->data();
-float* float_data = static_cast<float*>(data);
-
-// 获取只读数据指针
-const void* const_data = tensor->data();
-```
-
-#### 张量操作
-
-```cpp
-// 获取形状
+// 获取元数据
 const core::Shape& shape = tensor->shape();
-
-// 获取数据类型
 core::DataType dtype = tensor->dtype();
-
-// 获取字节大小
 size_t bytes = tensor->size_in_bytes();
+size_t offset = tensor->offset(); // 相对内存块的偏移量
 
-// 重塑形状（元素数量必须相同）
-core::Shape new_shape({1, 784});
-tensor->reshape(new_shape);
+// 获取数据指针
+void* data = tensor->data();
+float* float_data = tensor->data<float>();
 
-// 检查是否为空
-bool is_empty = tensor->empty();
+// 形状操作 (Zero-Copy)
+tensor->reshape({1, -1}); // 只修改 metadata，不移动数据
+
+// 静态内存规划支持
+tensor->bind_external_data_with_offset(storage, capacity, offset);
 ```
 
-### Shape
+### Storage
 
-形状类用于表示张量的维度信息。
+`Storage` 类管理底层的物理内存块 (Raw Buffer)，通常由 Engine 管理，用户较少直接操作。
 
 ```cpp
-// 创建形状
-core::Shape shape({2, 3, 4, 5});
-
-// 获取维度数
-size_t ndim = shape.ndim();  // 4
-
-// 获取总元素数
-int64_t numel = shape.numel();  // 120
-
-// 访问某个维度
-int64_t dim0 = shape[0];  // 2
-
-// 转换为字符串
-std::string str = shape.to_string();  // "[2, 3, 4, 5]"
+auto storage = std::make_shared<core::Storage>(core::DeviceType::CPU);
+storage->allocate(1024); // 分配 1KB
 ```
 
-### DataType
+## Runtime 模块
 
-支持的数据类型：
+Runtime 模块是推理的核心，采用了 "One Plan, Multiple Contexts" 架构。
 
-- `DataType::FLOAT32` - 32位浮点数
-- `DataType::FLOAT16` - 16位浮点数
-- `DataType::INT32` - 32位整数
-- `DataType::INT8` - 8位整数
-- `DataType::UINT8` - 8位无符号整数
-- `DataType::BOOL` - 布尔型
+### Engine
 
-## Backends 模块
-
-### Backend
-
-后端抽象接口，定义了不同硬件平台需要实现的方法。
+Engine 是也是一个门面类 (Facade)，负责构建 `InferencePlan`。
 
 ```cpp
-// 创建后端
-auto backend = backends::BackendFactory::create_backend(core::DeviceType::CPU);
+// 1. 配置
+runtime::EngineConfig config;
+config.device_type = core::DeviceType::CPU;
+config.enable_memory_planning = true; // 开启静态内存规划
 
-// 获取默认后端
-auto backend = backends::BackendFactory::get_default_backend();
+// 2. 创建 Engine
+runtime::Engine engine(config);
 
-// 内存操作
-void* ptr = backend->allocate(size);
-backend->deallocate(ptr);
-backend->memcpy(dst, src, size);
-backend->memset(ptr, value, size);
-
-// 同步
-backend->synchronize();
+// 3. 构建 (Build Phase)
+// 输入: 已经构建好的 Graph
+core::Status status = engine.build(graph); 
 ```
 
-### CPUBackend
+### ExecutionContext
 
-CPU 后端实现。
-
-```cpp
-auto cpu_backend = backends::CPUBackend::get_instance();
-```
-
-## Operators 模块
-
-### Operator
-
-算子基类，定义了算子的通用接口。
+`ExecutionContext` 代表一次推理请求的状态，是线程不安全的，但可以从同一个 Engine 并发创建多个。
 
 ```cpp
-// 前向计算
-core::Status forward(
-    const std::vector<std::shared_ptr<core::Tensor>>& inputs,
-    std::vector<std::shared_ptr<core::Tensor>>& outputs
-);
+// 1. 创建上下文
+auto ctx = engine.create_context();
 
-// 推断输出形状
-core::Status infer_shape(
-    const std::vector<core::Shape>& input_shapes,
-    std::vector<core::Shape>& output_shapes
-);
-```
+// 2. 准备数据
+ctx->set_input("input_name", input_tensor);
 
-### Conv2D
+// 3. 执行推理 (Run Phase)
+engine.execute(ctx.get()); // 执行后结果存储在 ctx 中
 
-2D 卷积算子。
-
-```cpp
-// 创建 Conv2D 算子
-auto conv = std::make_shared<operators::Conv2D>();
-
-// 设置参数
-auto param = std::make_shared<operators::Conv2DParam>();
-param->kernel_h = 3;
-param->kernel_w = 3;
-param->stride_h = 1;
-param->stride_w = 1;
-param->padding_h = 1;
-param->padding_w = 1;
-conv->set_param(param);
+// 4. 获取结果
+auto output_tensor = ctx->get_output("output_name");
 ```
 
 ## Graph 模块
 
 ### Graph
 
-计算图类。
+Graph 管理计算图的拓扑结构，支持基于端口 (Port) 的连接。
 
 ```cpp
-// 创建图
-graph::Graph graph;
-
-// 创建节点
-auto node1 = graph.create_node("node1");
-auto node2 = graph.create_node("node2");
-
-// 连接节点
-graph.connect("node1", "node2");
-
-// 设置输入输出
-graph.set_inputs({"input"});
-graph.set_outputs({"output"});
-
-// 验证图
-core::Status status = graph.validate();
-
-// 拓扑排序
-std::vector<std::shared_ptr<graph::Node>> sorted_nodes;
-status = graph.topological_sort(sorted_nodes);
-
-// 图优化
-status = graph.optimize();
-```
-
-### Node
-
-计算图节点。
-
-```cpp
-// 创建节点
-graph::Node node("my_node");
-
-// 设置算子
-node.set_operator(op);
-
-// 添加输入输出节点
-node.add_input(input_node);
-node.add_output(output_node);
-
-// 设置张量
-node.set_input_tensors(tensors);
-node.set_output_tensors(tensors);
-```
-
-## Runtime 模块
-
-### Engine
-
-推理引擎。
-
-```cpp
-// 配置引擎
-runtime::EngineConfig config;
-config.device_type = core::DeviceType::CPU;
-config.enable_profiling = true;
-config.max_workspace_size = 1024 * 1024 * 1024;  // 1GB
-
-// 创建引擎
-runtime::Engine engine(config);
-
-// 构建引擎
 auto graph = std::make_shared<graph::Graph>();
-// ... 构建图 ...
-core::Status status = engine.build(graph);
 
-// 执行推理
-std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs;
-std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-status = engine.forward(inputs, outputs);
+// 1. 创建节点
+auto node1 = graph->create_node("conv1");
+auto node2 = graph->create_node("relu1");
 
-// 获取输入输出信息
-std::vector<std::string> input_names = engine.get_input_names();
-std::vector<std::string> output_names = engine.get_output_names();
+// 2. 连接节点 (Port-based)
+// connect(src_name, dst_name, src_port, dst_port)
+graph->connect("conv1", "relu1", 0, 0); 
 
-// 性能分析
-engine.enable_profiling(true);
-std::string profiling_info = engine.get_profiling_info();
+// 3. 设置图的输入输出
+graph->set_inputs({"input"});
+graph->set_outputs({"output"});
 ```
 
-## Utils 模块
+## Kernels & Registry 模块
 
-### Logger
-
-日志系统。
+这一层负责具体的算子计算分发。
 
 ```cpp
-// 获取日志实例
-auto& logger = utils::Logger::get_instance();
+// 查找 Kernel
+// Key: OpType + DeviceType + DataType
+auto kernel = kernels::KernelRegistry::find(
+    op_type, 
+    core::DeviceType::CPU, 
+    core::DataType::FLOAT32
+);
 
-// 设置日志级别
-logger.set_level(utils::LogLevel::INFO);
-
-// 使用日志宏
-MI_LOG_DEBUG("Debug message");
-MI_LOG_INFO("Info message");
-MI_LOG_WARNING("Warning message");
-MI_LOG_ERROR("Error message");
-MI_LOG_FATAL("Fatal message");
+// 执行 Kernel
+if (kernel) {
+    kernels::KernelContext ctx;
+    ctx.inputs = ...;
+    ctx.outputs = ...;
+    kernel(ctx);
+}
 ```
 
-## 状态码
+## Importers 模块
+
+### OnnxParser
 
 ```cpp
-enum class Status {
-    SUCCESS,                    // 成功
-    ERROR_INVALID_ARGUMENT,     // 无效参数
-    ERROR_OUT_OF_MEMORY,        // 内存不足
-    ERROR_NOT_IMPLEMENTED,      // 未实现
-    ERROR_RUNTIME,              // 运行时错误
-    ERROR_BACKEND,              // 后端错误
-    ERROR_UNKNOWN               // 未知错误
-};
+importers::OnnxParser parser;
 
-// 转换为字符串
-const char* str = core::status_to_string(status);
+// 解析并返回 Graph
+auto graph = parser.parse_from_file("model.onnx"); 
+// 或者
+auto graph = parser.parse_from_memory(buffer, size);
+
+if (!graph) {
+    std::cout << parser.get_error() << std::endl;
+}
 ```
 
+## 状态码 (Status)
+
+所有主要 API 均返回 `core::Status`。
+
+```cpp
+if (status != core::Status::SUCCESS) {
+    std::cerr << "Error: " << core::StatusString(status) << std::endl;
+}
+```

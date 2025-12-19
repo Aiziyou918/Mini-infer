@@ -1,337 +1,144 @@
-# Mini-Infer 快速入门
+# Mini-Infer 快速入门 (Getting Started)
 
-本文档将帮助你快速上手 Mini-Infer 推理框架。
+本文档将带你快速上手 Mini-Infer，体验如何加载 ONNX 模型并进行高性能推理。
 
-## 第一步：构建项目
+## 1. 准备工作
 
-### Windows
+确保你已经成功构建了项目。
+- Windows: `.\build.ps1`
+- Linux: `./build.sh`
 
-```powershell
-.\build.ps1 -Test
-```
+## 2. 核心概念
 
-### Linux/macOS
+在开始写代码前，理解以下三个核心对象：
 
-```bash
-chmod +x build.sh
-./build.sh --test
-```
+1.  **Graph**: 静态的计算图拓扑结构（通常由 ONNX Parser 生成）。
+2.  **Engine**: 管理 `InferencePlan`（包含优化后的图和内存规划），它是只读且线程安全的。
+3.  **ExecutionContext**: 每次推理请求的上下文（包含 Tensor 数据），它是轻量且可变的。
 
-## 第二步：运行第一个示例
+## 3. 完整示例：加载 ONNX 并推理
 
-### 创建张量
-
-创建文件 `my_first_app.cpp`：
+这个示例展示了标准的推理流程：
 
 ```cpp
-#include "mini_infer/mini_infer.h"
+#include "mini_infer/runtime/engine.h"
+#include "mini_infer/importers/onnx_parser.h"
+#include "mini_infer/core/tensor.h"
 #include <iostream>
+#include <vector>
 
 using namespace mini_infer;
 
 int main() {
-    // 1. 创建一个张量
-    core::Shape shape({1, 3, 224, 224});  // NCHW 格式
-    auto tensor = core::Tensor::create(shape, core::DataType::FLOAT32);
+    // ----------------------------------------------------------------
+    // Step 1: 加载模型 (Load Model)
+    // ----------------------------------------------------------------
+    importers::OnnxParser parser;
+    auto graph = parser.parse_from_file("lenet5.onnx");
     
-    std::cout << "创建了形状为 " << tensor->shape().to_string() 
-              << " 的张量" << std::endl;
-    std::cout << "总元素数: " << tensor->shape().numel() << std::endl;
-    std::cout << "内存大小: " << tensor->size_in_bytes() << " bytes" << std::endl;
-    
-    // 2. 访问和填充数据
-    float* data = static_cast<float*>(tensor->data());
-    for (int64_t i = 0; i < 10; ++i) {
-        data[i] = static_cast<float>(i) * 0.1f;
-        std::cout << "data[" << i << "] = " << data[i] << std::endl;
+    if (!graph) {
+        std::cerr << "Failed to parse ONNX model: " << parser.get_error() << std::endl;
+        return -1;
     }
-    
-    return 0;
-}
-```
+    std::cout << "Successfully parsed graph with " << graph->nodes().size() << " nodes." << std::endl;
 
-编译运行：
-
-```bash
-# Linux/macOS
-g++ my_first_app.cpp -o my_first_app \
-    -Iinclude \
-    -Lbuild/lib \
-    -lmini_infer_core \
-    -lmini_infer_utils \
-    -lpthread \
-    -std=c++17
-
-./my_first_app
-
-# Windows (使用 MSVC)
-cl my_first_app.cpp /std:c++17 /Iinclude /link build\lib\Release\mini_infer_core.lib
-```
-
-## 第三步：使用后端
-
-```cpp
-#include "mini_infer/mini_infer.h"
-#include <iostream>
-
-using namespace mini_infer;
-
-int main() {
-    // 获取 CPU 后端
-    auto backend = backends::BackendFactory::get_default_backend();
-    
-    std::cout << "使用后端: " << backend->name() << std::endl;
-    
-    // 分配内存
-    size_t size = 1024 * sizeof(float);
-    void* ptr = backend->allocate(size);
-    
-    // 初始化为 0
-    backend->memset(ptr, 0, size);
-    
-    // 填充数据
-    float* data = static_cast<float*>(ptr);
-    for (int i = 0; i < 10; ++i) {
-        data[i] = i * 0.5f;
-    }
-    
-    // 释放内存
-    backend->deallocate(ptr);
-    
-    std::cout << "内存操作完成" << std::endl;
-    
-    return 0;
-}
-```
-
-## 第四步：构建计算图
-
-```cpp
-#include "mini_infer/mini_infer.h"
-#include <iostream>
-
-using namespace mini_infer;
-
-int main() {
-    // 创建计算图
-    auto graph = std::make_shared<graph::Graph>();
-    
-    // 添加节点
-    auto input = graph->create_node("input");
-    auto conv1 = graph->create_node("conv1");
-    auto relu1 = graph->create_node("relu1");
-    auto pool1 = graph->create_node("pool1");
-    auto output = graph->create_node("output");
-    
-    // 连接节点
-    graph->connect("input", "conv1");
-    graph->connect("conv1", "relu1");
-    graph->connect("relu1", "pool1");
-    graph->connect("pool1", "output");
-    
-    // 设置输入输出
-    graph->set_inputs({"input"});
-    graph->set_outputs({"output"});
-    
-    // 验证图
-    auto status = graph->validate();
-    if (status == core::Status::SUCCESS) {
-        std::cout << "✓ 图验证通过" << std::endl;
-    }
-    
-    // 拓扑排序
-    std::vector<std::shared_ptr<graph::Node>> sorted_nodes;
-    status = graph->topological_sort(sorted_nodes);
-    
-    if (status == core::Status::SUCCESS) {
-        std::cout << "执行顺序: ";
-        for (const auto& node : sorted_nodes) {
-            std::cout << node->name() << " -> ";
-        }
-        std::cout << "完成" << std::endl;
-    }
-    
-    return 0;
-}
-```
-
-输出：
-```
-✓ 图验证通过
-执行顺序: input -> conv1 -> relu1 -> pool1 -> output -> 完成
-```
-
-## 第五步：使用推理引擎
-
-```cpp
-#include "mini_infer/mini_infer.h"
-#include <iostream>
-
-using namespace mini_infer;
-
-int main() {
-    // 1. 构建计算图
-    auto graph = std::make_shared<graph::Graph>();
-    // ... 添加节点和连接 ...
-    
-    // 2. 配置引擎
+    // ----------------------------------------------------------------
+    // Step 2: 初始化引擎 (Initialize Engine)
+    // ----------------------------------------------------------------
     runtime::EngineConfig config;
     config.device_type = core::DeviceType::CPU;
-    config.enable_profiling = true;
-    
-    // 3. 创建引擎
+    config.enable_memory_planning = true;  // 启用静态内存规划 (High Performance)
+    config.enable_profiling = false;       // 可选：启用性能分析
+
     runtime::Engine engine(config);
     
-    // 4. 构建引擎（这会优化图并分配内存）
-    auto status = engine.build(graph);
+    // Build 阶段会进行：
+    // 1. Shape 推导
+    // 2. 静态内存规划 (计算每个 Tensor 的 Offset)
+    // 3. 准备执行计划
+    core::Status status = engine.build(graph);
     if (status != core::Status::SUCCESS) {
-        std::cerr << "引擎构建失败" << std::endl;
-        return 1;
+        std::cerr << "Engine build failed." << std::endl;
+        return -1;
     }
+
+    // ----------------------------------------------------------------
+    // Step 3: 准备数据 (Prepare Input)
+    // ----------------------------------------------------------------
+    // 创建一个 ExecutionContext（这是一个轻量级操作）
+    auto ctx = engine.create_context();
+
+    // 假设模型输入名为 "input.1"，形状为 [1, 1, 32, 32]
+    auto input_tensor = core::Tensor::create({1, 1, 32, 32}, core::DataType::FLOAT32);
     
-    // 5. 准备输入数据
-    core::Shape input_shape({1, 3, 224, 224});
-    auto input_tensor = core::Tensor::create(input_shape, core::DataType::FLOAT32);
+    // 填充一些假数据
+    float* data = input_tensor->data<float>();
+    for (int i = 0; i < 32*32; ++i) data[i] = 1.0f;
+
+    // 将输入绑定到 Context
+    ctx->set_input("input.1", input_tensor);
+
+    // ----------------------------------------------------------------
+    // Step 4: 执行推理 (Execute)
+    // ----------------------------------------------------------------
+    // Engine 是无状态的，所有的状态都在 Context 中
+    status = engine.execute(ctx.get());
     
-    // 填充输入数据
-    float* input_data = static_cast<float*>(input_tensor->data());
-    for (int64_t i = 0; i < input_tensor->shape().numel(); ++i) {
-        input_data[i] = 0.5f;  // 示例数据
+    if (status != core::Status::SUCCESS) {
+        std::cerr << "Execution failed." << std::endl;
+        return -1;
     }
+
+    // ----------------------------------------------------------------
+    // Step 5: 获取结果 (Get Output)
+    // ----------------------------------------------------------------
+    // 假设模型输出名为 "19"
+    auto output_tensor = ctx->get_output("19");
     
-    // 6. 执行推理
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs;
-    inputs["input"] = input_tensor;
-    
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-    status = engine.forward(inputs, outputs);
-    
-    if (status == core::Status::SUCCESS) {
-        std::cout << "✓ 推理成功" << std::endl;
-        
-        // 获取输出
-        auto output_tensor = outputs["output"];
-        std::cout << "输出形状: " << output_tensor->shape().to_string() << std::endl;
+    if (output_tensor) {
+        std::cout << "Inference Output Shape: " << output_tensor->shape().to_string() << std::endl;
+        // 打印前几个结果
+        const float* out_data = output_tensor->data<float>();
+        for (int i = 0; i < 10 && i < output_tensor->shape().numel(); ++i) {
+            std::cout << out_data[i] << " ";
+        }
+        std::cout << std::endl;
     }
-    
-    // 7. 查看性能信息（如果启用了 profiling）
-    if (config.enable_profiling) {
-        std::cout << engine.get_profiling_info() << std::endl;
-    }
-    
+
     return 0;
 }
 ```
 
-## 常用 API 速查
+## 4. 进阶：如何创建计算图 (手动方式)
 
-### 张量操作
-
-```cpp
-// 创建张量
-auto tensor = core::Tensor::create({N, C, H, W}, core::DataType::FLOAT32);
-
-// 访问数据
-float* data = static_cast<float*>(tensor->data());
-
-// 获取信息
-tensor->shape()           // 形状
-tensor->dtype()           // 数据类型
-tensor->size_in_bytes()   // 字节大小
-tensor->empty()           // 是否为空
-
-// 重塑
-tensor->reshape(new_shape);
-```
-
-### 图操作
+虽然我们推荐使用 ONNX，但你也可以手动构建图（主要用于测试）：
 
 ```cpp
-// 创建图和节点
 auto graph = std::make_shared<graph::Graph>();
-auto node = graph->create_node("node_name");
 
-// 连接节点
-graph->connect("src_node", "dst_node");
+// 1. 创建节点
+auto conv = graph->create_node("Conv_1");
+// 设置 Operator Param (Conv2DParam) ...
 
-// 设置输入输出
-graph->set_inputs({"input1", "input2"});
-graph->set_outputs({"output"});
+auto relu = graph->create_node("ReLU_1");
 
-// 验证和排序
-graph->validate();
-graph->topological_sort(sorted_nodes);
+// 2. 连接
+// 注意：现在支持端口 (src_port, dst_port)
+// 将 Conv_1 的第 0 个输出连接到 ReLU_1 的第 0 个输入
+graph->connect("Conv_1", "ReLU_1", 0, 0);
+
+// 3. 标记图的 IO
+graph->set_inputs({"Conv_1"});
+graph->set_outputs({"ReLU_1"});
 ```
 
-### 引擎操作
+## 5. 常见问题 (FAQ)
 
-```cpp
-// 创建引擎
-runtime::EngineConfig config;
-config.device_type = core::DeviceType::CPU;
-runtime::Engine engine(config);
+**Q: 为什么找不到 `BackendFactory` 了？**
+A: 在新架构中，用户不再手动管理 Backend。Engine 会根据 Config 自动在内部管理 `DeviceContext`。如果需要扩展 Backend，请实现新的 `DeviceContext` 类并注册。
 
-// 构建和执行
-engine.build(graph);
-engine.forward(inputs, outputs);
+**Q: 如何进行多线程推理？**
+A: `Engine` 对象是线程安全的。你可以在多个线程中，分别为每个请求创建一个 `ExecutionContext` (ctx1, ctx2...)，然后并发调用 `engine.execute(ctx1)` 和 `engine.execute(ctx2)`。这是处理高并发请求的标准模式。
 
-// 获取信息
-engine.get_input_names();
-engine.get_output_names();
-```
-
-### 日志
-
-```cpp
-// 设置日志级别
-utils::Logger::get_instance().set_level(utils::LogLevel::INFO);
-
-// 使用日志
-MI_LOG_DEBUG("调试信息");
-MI_LOG_INFO("普通信息");
-MI_LOG_WARNING("警告信息");
-MI_LOG_ERROR("错误信息");
-```
-
-## 下一步
-
-- 阅读 [API 文档](API.md) 了解详细接口
-- 阅读 [架构文档](ARCHITECTURE.md) 了解设计原理
-- 查看 `examples/` 目录下的更多示例
-- 尝试实现自己的算子
-
-## 常见问题
-
-**Q: 如何在自己的 CMake 项目中使用 Mini-Infer？**
-
-A: 在 CMakeLists.txt 中添加：
-
-```cmake
-add_subdirectory(path/to/Mini-Infer)
-target_link_libraries(your_target PRIVATE mini_infer_runtime)
-```
-
-**Q: 支持哪些数据类型？**
-
-A: 目前支持 FLOAT32, FLOAT16, INT32, INT8, UINT8, BOOL。
-
-**Q: 如何启用 GPU 支持？**
-
-A: GPU (CUDA) 支持正在开发中，敬请期待。
-
-**Q: 性能如何优化？**
-
-A: 
-- 使用 Release 模式构建
-- 启用编译器优化选项
-- 使用合适的数据类型（如 FP16）
-- 未来版本将支持图优化和算子融合
-
-## 获取帮助
-
-- 查看 [Issues](https://github.com/your-repo/Mini-Infer/issues)
-- 阅读[贡献指南](../CONTRIBUTING.md)
-- 查看代码注释和文档
-
-祝你使用愉快！🚀
-
+**Q: 内存是如何管理的？**
+A: 启用了 `enable_memory_planning` 后，Engine 会计算出一块足够大的连续内存来容纳所有中间 Tensor。Context 创建时，只会分配这一大块内存（称为 Arena），所有中间 Tensor 实际上都是这就大块内存的 View（通过 Offset 实现）。这极大地提高了缓存命中率并消除了内存碎片。

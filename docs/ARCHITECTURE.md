@@ -2,286 +2,103 @@
 
 ## 总体架构
 
-Mini-Infer 采用分层设计，从底层到上层依次为：
+Mini-Infer 采用 **TensorRT-like** 的分层设计，强调高性能推理和异构设备支持。
 
 ```
 ┌─────────────────────────────────────┐
-│         Application Layer           │  应用层
+│         Application Layer           │  应用层 (InferencePlan, ExecutionContext)
 ├─────────────────────────────────────┤
-│          Runtime Engine             │  运行时层
+│          Runtime Engine             │  运行时层 (MemoryPlanner, ShapeInference)
 ├─────────────────────────────────────┤
-│      Graph & Optimization           │  图层
+│      Graph & Optimization           │  图层 (Port-based Connection)
 ├─────────────────────────────────────┤
-│          Operators                  │  算子层
+│          Operators                  │  算子层 (Metadata Holder)
 ├─────────────────────────────────────┤
-│    Backend Abstraction Layer        │  后端抽象层
+│    Registry & Dispatcher            │  分发层 (Key: OpType+Device+DataType)
 ├──────────────┬──────────────────────┤
-│  CPU Backend │    CUDA Backend      │  后端实现层
+│  CPU Kernels │    CUDA Kernels      │  计算核心 (IMPL)
 ├──────────────┴──────────────────────┤
-│         Core (Tensor, etc)          │  核心层
+│   Backend Context (Stream/Handle)   │  执行环境 (DeviceContext)
+├─────────────────────────────────────┤
+│         Core (Tensor, Storage)      │  核心层 (Zero-Copy)
 └─────────────────────────────────────┘
 ```
 
-## 模块详解
+## 核心模块详解
 
-### 1. Core 模块
+### 1. Core 模块 (基础底座)
 
-**职责**: 提供框架的基础数据结构和类型定义
+**职责**: 提供高性能、低开销的基础数据结构。
 
-**主要组件**:
-- `Tensor`: 多维数组，支持不同数据类型
-- `Shape`: 形状表示
-- `Allocator`: 内存分配器接口
-- `DataType`: 数据类型枚举
-- `Device`: 设备抽象
+*   `Tensor`:
+    *   **View 机制**: 与 PyTorch 类似，支持 Slice/Reshape 而不拷贝数据。
+    *   **Metadata**: 包含 Shape, Strides, Offset, Data Type, Device Type。
+*   `Storage`:
+    *   **Raw Memory**: 管理物理内存块 (void*)。
+    *   **Ownership**: 通过 `shared_ptr` 管理生命周期。
+*   `Allocator`:
+    *   **Lock-Free**: Release 模式下无锁分配，性能极高。
+    *   **Alignment**: 强制 AVX/CUDA 对齐。
 
-**设计原则**:
-- 最小化依赖，不依赖其他模块
-- 高性能的内存管理
-- 类型安全
+### 2. Runtime 模块 (执行大脑)
 
-### 2. Backends 模块
+**职责**: 管理推理的生命周期，实现“一次构建，多次执行”。
 
-**职责**: 提供硬件抽象层，支持多种计算后端
+*   `Engine`: API 门面，隐藏内部复杂性。
+*   `InferencePlan` (Immutable):
+    *   持有优化后的 Graph。
+    *   持有静态内存规划结果 (Memory Plan)。
+    *   **线程安全**: 多线程可共享同一个 Plan。
+*   `ExecutionContext` (Mutable):
+    *   **Per-Request**: 每个推理请求创建一个 Context。
+    *   **Memory Pool**: 根据 Plan 申请一块大内存 (`Storage`)，所有中间 Tensor 都是这块内存的 Offset View。
+    *   **Device Management**: 维护 `DeviceContext` (如 CUDA Stream)。
 
-**架构**:
-```
-Backend (接口)
-    ├── CPUBackend (CPU 实现)
-    └── CUDABackend (GPU 实现, 待开发)
-```
+### 3. Backends & Kernels 模块 (计算后端)
 
-**关键接口**:
-- 内存管理：allocate, deallocate
-- 数据传输：memcpy, memset
-- 同步控制：synchronize
+**职责**: 执行具体的数学运算，支持硬件异构。
 
-**扩展性**:
-- 通过继承 `Backend` 接口可以轻松添加新后端
-- 后端工厂模式支持动态后端选择
+*   `DeviceContext`:
+    *   **Execution Environment**: 管理线程池 (CPU) 或 Stream/Handle (GPU)。
+    *   **TLS Injection**: 通过 Thread Local Storage 注入到 Kernel 中，无需修改 Kernel 签名。
+*   `KernelRegistry`:
+    *   **Dispatch Key**: `{OpType, DeviceType, DataType}`。
+    *   **Extensibility**: 支持静态注册新 Kernel。
+*   `Kernels` (CPU/CUDA):
+    *   纯粹的计算函数 (Stateless)。
+    *   CPU: Im2Col + GEMM, SIMD optimized.
+    *   CUDA: cuDNN / cuBLAS wrappers.
 
-### 3. Operators 模块
+### 4. Graph 模块 (拓扑结构)
 
-**职责**: 实现各种深度学习算子
+**职责**: 描述计算逻辑。
 
-**算子注册机制**:
-```cpp
-REGISTER_OPERATOR(Conv2D, Conv2DOperator);
-```
+*   `Node`:
+    *   **Port-Based**: 支持多输入多输出 (MIMO)，如 Split/Contact/LSTM。
+    *   **OpType Caching**: 优化遍历速度。
+*   `Graph`:
+    *   **Topological Sort**: 保证执行顺序。
+    *   **Validation**: 环检测。
 
-**算子接口**:
-- `forward()`: 前向计算
-- `infer_shape()`: 形状推断
+### 5. Operators & Importers (前端)
 
-**已实现算子**:
-- Conv2D (卷积)
-- 更多算子开发中...
+*   `Operators`: 算子元数据容器 (OpParam) 和 Shape 推导逻辑。
+*   `Importers (OnnxParser)`:
+    *   **Pimpl IDIOM**: 隔离 Protobuf 依赖，保证 ABI 兼容性。
+    *   **ModelImporter**: 将 ONNX 节点映射为 Graph Node 连接。
 
-**待实现算子**:
-- ReLU, Sigmoid, Tanh (激活函数)
-- MaxPool, AvgPool (池化)
-- BatchNorm, LayerNorm (归一化)
-- Gemm, MatMul (矩阵运算)
-- Concat, Split (张量操作)
+## 关键技术特性
 
-### 4. Graph 模块
+### 1. 静态内存规划 (Static Memory Planning)
+采用 **Linear Scan** 算法，在 Graph 构建阶段计算所有 Tensor 的生命周期。我们将所有中间张量压缩到**一块连续内存**中。
+*   **收益**: 内存碎片率接近 0，内存分配开销为 O(1)。
 
-**职责**: 表示和管理计算图
+### 2. 零拷贝设计 (Zero-Copy)
+*   **Tensor View**: Reshape/Slice 操作只修改 Metadata。
+*   **Input Binding**: 支持用户传入外部指针直接作为输入 Tensor，避免 Host-to-Device 拷贝。
 
-**组件**:
-- `Node`: 计算图节点，包含算子和张量
-- `Graph`: 计算图，管理节点和边
+### 3. 下一步规划 (Roadmap)
 
-**功能**:
-- 图构建：创建节点、连接节点
-- 拓扑排序：确定执行顺序
-- 环检测：验证图的有效性
-- 图优化（待完善）：算子融合、常量折叠等
-
-**图表示**:
-```
-Input → Conv2D → ReLU → MaxPool → Output
-```
-
-### 5. Runtime 模块
-
-**职责**: 执行推理，管理运行时状态
-
-**核心组件**:
-- `Engine`: 推理引擎
-- `EngineConfig`: 引擎配置
-
-**工作流程**:
-1. 构建阶段：
-   - 图验证
-   - 图优化
-   - 拓扑排序
-   - 内存分配
-
-2. 推理阶段：
-   - 设置输入
-   - 按拓扑顺序执行节点
-   - 返回输出
-
-**性能优化**（规划中）:
-- 内存复用
-- 算子融合
-- 并行执行
-
-### 6. Utils 模块
-
-**职责**: 提供辅助工具
-
-**组件**:
-- `Logger`: 日志系统
-- `Profiler`: 性能分析（待开发）
-- `Timer`: 计时器（待开发）
-
-## 数据流
-
-### 推理数据流
-
-```
-User Input (Tensor)
-    ↓
-Engine::forward()
-    ↓
-Set Input Tensors
-    ↓
-Execute Nodes (Topological Order)
-    ↓  Node1::forward()
-    ↓  Node2::forward()
-    ↓  ...
-    ↓
-Collect Output Tensors
-    ↓
-Return to User
-```
-
-### 内存管理流
-
-```
-Tensor Creation
-    ↓
-Allocator::allocate()
-    ↓
-Backend::allocate()
-    ↓
-System malloc/cudaMalloc
-    ↓
-Shared Pointer Management
-    ↓
-Automatic Deallocation
-```
-
-## 扩展点
-
-### 1. 添加新算子
-
-```cpp
-// 1. 定义算子类
-class MyOperator : public Operator {
-public:
-    Status forward(...) override;
-    Status infer_shape(...) override;
-};
-
-// 2. 注册算子
-REGISTER_OPERATOR(MyOp, MyOperator);
-```
-
-### 2. 添加新后端
-
-```cpp
-// 1. 实现 Backend 接口
-class MyBackend : public Backend {
-public:
-    void* allocate(size_t size) override;
-    // 实现其他接口...
-};
-
-// 2. 在 BackendFactory 中注册
-```
-
-### 3. 图优化
-
-```cpp
-// 在 Graph::optimize() 中添加优化 pass
-Status Graph::optimize() {
-    // Pass 1: 算子融合
-    fuse_operators();
-    
-    // Pass 2: 常量折叠
-    fold_constants();
-    
-    // Pass 3: 死代码消除
-    eliminate_dead_code();
-    
-    return Status::SUCCESS;
-}
-```
-
-## 性能考虑
-
-### CPU 优化
-- SIMD 指令（AVX, SSE）
-- 多线程并行（OpenMP, TBB）
-- 缓存友好的数据布局
-
-### GPU 优化（未来）
-- CUDA 内核优化
-- 内存合并访问
-- 共享内存使用
-- Stream 并行
-
-### 内存优化
-- 内存池
-- 原地操作
-- 内存复用
-
-## 依赖关系
-
-```
-Runtime → Graph → Operators → Backends → Core
-         ↓                         ↓
-       Utils                    Utils
-```
-
-## 线程安全
-
-**当前状态**: 非线程安全
-
-**未来计划**:
-- 引擎级别的线程隔离
-- 后端的线程池支持
-- 算子的并行执行
-
-## 错误处理
-
-使用 `Status` 枚举进行错误处理：
-
-```cpp
-Status status = engine.build(graph);
-if (status != Status::SUCCESS) {
-    // 处理错误
-    MI_LOG_ERROR("Build failed: " + status_to_string(status));
-}
-```
-
-## 未来规划
-
-### 短期目标
-- [ ] 完善常用算子实现
-- [ ] 实现基本的图优化
-- [ ] 添加 ONNX 模型加载
-
-### 中期目标
-- [ ] CUDA 后端支持
-- [ ] FP16/INT8 量化支持
-- [ ] 动态 shape 支持
-
-### 长期目标
-- [ ] 自动调优
-- [ ] 模型压缩
-- [ ] 分布式推理
-
+*   [ ] **Optimization**: 为 CPU Kernel 引入 AVX2/AVX-512 指令集优化。
+*   [ ] **GPU Support**: 实现 `CUDADeviceContext` 和 CUDA Kernels。
+*   [ ] **Quantization**: 支持 INT8 量化推理。
