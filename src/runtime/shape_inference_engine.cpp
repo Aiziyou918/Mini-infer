@@ -20,17 +20,49 @@ core::Status ShapeInferenceEngine::ensure_sorted() {
 
 core::Status ShapeInferenceEngine::infer_shapes(
     const std::unordered_map<std::string, core::Shape>& input_shapes) {
-    // Ensure graph is sorted
     auto status = ensure_sorted();
     if (status != core::Status::SUCCESS) {
         return status;
     }
 
+    std::vector<RuntimeInputShape> runtime_shapes;
+    runtime_shapes.reserve(input_shapes.size());
+    for (const auto& [name, shape] : input_shapes) {
+        auto node = graph_->get_node(name);
+        if (!node) {
+            MI_LOG_ERROR("[ShapeInferenceEngine] Input node not found: " + name);
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        RuntimeInputShape binding;
+        binding.node_id = node->id();
+        binding.shape = shape;
+        runtime_shapes.push_back(binding);
+    }
+
+    return infer_shapes(runtime_shapes);
+}
+
+core::Status ShapeInferenceEngine::infer_shapes(
+    const std::vector<RuntimeInputShape>& input_shapes) {
+    auto status = ensure_sorted();
+    if (status != core::Status::SUCCESS) {
+        return status;
+    }
+    return infer_shapes_internal(input_shapes);
+}
+
+core::Status ShapeInferenceEngine::infer_shapes_internal(
+    const std::vector<RuntimeInputShape>& input_shapes) {
     if (verbose_) {
         MI_LOG_INFO("[ShapeInferenceEngine] Starting runtime shape inference...");
         MI_LOG_INFO("[ShapeInferenceEngine] Input shapes:");
-        for (const auto& [name, shape] : input_shapes) {
-            MI_LOG_INFO("[ShapeInferenceEngine]   " + name + ": " + shape.to_string());
+        for (const auto& binding : input_shapes) {
+            if (binding.node_id < sorted_nodes_.size() && sorted_nodes_[binding.node_id]) {
+                MI_LOG_INFO("[ShapeInferenceEngine]   " +
+                            sorted_nodes_[binding.node_id]->name() + ": " +
+                            binding.shape.to_string());
+            }
         }
     }
 
@@ -39,13 +71,9 @@ core::Status ShapeInferenceEngine::infer_shapes(
     inferred_shapes_.resize(sorted_nodes_.size());
 
     // Store input shapes (by node ID)
-    for (const auto& [name, shape] : input_shapes) {
-        auto node = graph_->get_node(name);
-        if (node) {
-            size_t node_id = node->id();
-            if (node_id < inferred_shapes_.size()) {
-                inferred_shapes_[node_id] = {shape};  // Input nodes have single output
-            }
+    for (const auto& binding : input_shapes) {
+        if (binding.node_id < inferred_shapes_.size()) {
+            inferred_shapes_[binding.node_id] = {binding.shape};  // Input nodes have single output
         }
     }
 
@@ -129,6 +157,12 @@ core::Status ShapeInferenceEngine::infer_shapes(
 
     // Cache input shapes for comparison
     last_input_shapes_ = input_shapes;
+    last_input_shapes_lookup_.clear();
+    for (const auto& binding : input_shapes) {
+        if (binding.node_id < sorted_nodes_.size() && sorted_nodes_[binding.node_id]) {
+            last_input_shapes_lookup_[sorted_nodes_[binding.node_id]->name()] = binding.shape;
+        }
+    }
 
     if (verbose_) {
         MI_LOG_INFO("[ShapeInferenceEngine] Shape inference completed: " +
@@ -157,23 +191,37 @@ const core::Shape* ShapeInferenceEngine::get_inferred_shape(const std::string& t
 
 bool ShapeInferenceEngine::shapes_changed(
     const std::unordered_map<std::string, core::Shape>& input_shapes) const {
-    // Check if number of inputs changed
-    if (input_shapes.size() != last_input_shapes_.size()) {
+    if (input_shapes.size() != last_input_shapes_lookup_.size()) {
         return true;
     }
 
-    // Check each input shape
     for (const auto& [name, shape] : input_shapes) {
-        auto it = last_input_shapes_.find(name);
-        if (it == last_input_shapes_.end()) {
-            return true;  // New input
+        auto it = last_input_shapes_lookup_.find(name);
+        if (it == last_input_shapes_lookup_.end()) {
+            return true;
         }
 
         if (it->second != shape) {
-            return true;  // Shape changed
+            return true;
         }
     }
 
+    return false;
+}
+
+bool ShapeInferenceEngine::shapes_changed(
+    const std::vector<RuntimeInputShape>& input_shapes) const {
+    if (input_shapes.size() != last_input_shapes_.size()) {
+        return true;
+    }
+    for (size_t i = 0; i < input_shapes.size(); ++i) {
+        if (input_shapes[i].node_id != last_input_shapes_[i].node_id) {
+            return true;
+        }
+        if (input_shapes[i].shape != last_input_shapes_[i].shape) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -209,6 +257,7 @@ std::vector<std::string> ShapeInferenceEngine::get_tensors_needing_reallocation(
 void ShapeInferenceEngine::clear_cache() {
     inferred_shapes_.clear();
     last_input_shapes_.clear();
+    last_input_shapes_lookup_.clear();
 }
 
 }  // namespace runtime

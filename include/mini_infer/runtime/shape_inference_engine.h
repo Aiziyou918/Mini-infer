@@ -29,6 +29,11 @@ class ShapeInferenceEngine {
     explicit ShapeInferenceEngine(std::shared_ptr<graph::Graph> graph);
     ~ShapeInferenceEngine() = default;
 
+    struct RuntimeInputShape {
+        size_t node_id{0};
+        core::Shape shape;
+    };
+
     /**
      * @brief Infer all tensor shapes based on current input shapes
      *
@@ -38,6 +43,7 @@ class ShapeInferenceEngine {
      * @return Status::SUCCESS if inference succeeded
      */
     core::Status infer_shapes(const std::unordered_map<std::string, core::Shape>& input_shapes);
+    core::Status infer_shapes(const std::vector<RuntimeInputShape>& input_shapes);
 
     /**
      * @brief Get inferred shape for a tensor
@@ -54,6 +60,7 @@ class ShapeInferenceEngine {
      * @return True if shapes are different from cached shapes
      */
     bool shapes_changed(const std::unordered_map<std::string, core::Shape>& input_shapes) const;
+    bool shapes_changed(const std::vector<RuntimeInputShape>& input_shapes) const;
 
     /**
      * @brief Get list of tensors that need reallocation
@@ -83,7 +90,8 @@ class ShapeInferenceEngine {
     // Cached inference results (indexed by node ID for O(1) access)
     // Each node can have multiple outputs, so we store vector<Shape> per node
     std::vector<std::vector<core::Shape>> inferred_shapes_;           // [node_id][output_index]
-    std::unordered_map<std::string, core::Shape> last_input_shapes_;  // Only for change detection
+    std::unordered_map<std::string, core::Shape> last_input_shapes_lookup_;
+    std::vector<RuntimeInputShape> last_input_shapes_;
 
     bool verbose_{false};
 
@@ -91,6 +99,7 @@ class ShapeInferenceEngine {
      * @brief Perform topological sort if needed
      */
     core::Status ensure_sorted();
+    core::Status infer_shapes_internal(const std::vector<RuntimeInputShape>& input_shapes);
 };
 
 }  // namespace runtime

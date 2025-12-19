@@ -55,6 +55,12 @@ core::Status Engine::build(std::shared_ptr<graph::Graph> graph) {
     }
     MI_LOG_INFO("[Engine] Node ID assignment completed");
 
+    auto binding_status = initialize_input_bindings();
+    if (binding_status != core::Status::SUCCESS) {
+        MI_LOG_ERROR("[Engine] Failed to initialize input bindings");
+        return binding_status;
+    }
+
     // Step 3: Shape inference
     MI_LOG_INFO("[Engine] Step 3: Inferring tensor shapes...");
     if (config_.enable_dynamic_shapes && config_.optimization_profile) {
@@ -440,11 +446,59 @@ core::Status Engine::forward(
         return core::Status::ERROR_RUNTIME;
     }
 
+    std::vector<std::shared_ptr<core::Tensor>> ordered_inputs;
+    auto status = gather_map_inputs(inputs, ordered_inputs);
+    if (status != core::Status::SUCCESS) {
+        return status;
+    }
+
+    std::vector<std::shared_ptr<core::Tensor>> ordered_outputs;
+    status = forward(ordered_inputs, ordered_outputs);
+    if (status != core::Status::SUCCESS) {
+        return status;
+    }
+
+    outputs.clear();
+    const auto& output_names = graph_->outputs();
+    for (size_t idx = 0; idx < output_names.size() && idx < ordered_outputs.size(); ++idx) {
+        if (ordered_outputs[idx]) {
+            outputs[output_names[idx]] = ordered_outputs[idx];
+        }
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
+                             std::vector<std::shared_ptr<core::Tensor>>& outputs) {
+    if (!graph_) {
+        return core::Status::ERROR_RUNTIME;
+    }
+
+    if (input_bindings_.empty()) {
+        auto status = initialize_input_bindings();
+        if (status != core::Status::SUCCESS) {
+            return status;
+        }
+    }
+
+    if (inputs.size() != input_bindings_.size()) {
+        MI_LOG_ERROR("[Engine] Expected " + std::to_string(input_bindings_.size()) +
+                     " inputs, but got " + std::to_string(inputs.size()));
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    std::vector<ShapeInferenceEngine::RuntimeInputShape> runtime_input_shapes;
+    auto status = build_runtime_shapes(inputs, runtime_input_shapes);
+    if (status != core::Status::SUCCESS) {
+        return status;
+    }
+
     // Check for dynamic shape changes
     if (config_.enable_dynamic_shapes && shape_inference_engine_) {
-        if (check_shape_change(inputs)) {
+        if (check_shape_change(runtime_input_shapes)) {
             MI_LOG_INFO("[Engine] Input shape changed, re-inferring shapes...");
-            auto status = handle_shape_change(inputs);
+            status = handle_shape_change(runtime_input_shapes);
             if (status != core::Status::SUCCESS) {
                 MI_LOG_ERROR("[Engine] Failed to handle shape change");
                 return status;
@@ -452,46 +506,9 @@ core::Status Engine::forward(
         }
     }
 
-    // Set input tensors and validate shapes
-    for (const auto& input_name : graph_->inputs()) {
-        auto it = inputs.find(input_name);
-        if (it == inputs.end()) {
-            MI_LOG_ERROR("[Engine] Missing input: " + input_name);
-            return core::Status::ERROR_INVALID_ARGUMENT;
-        }
-
-        auto node = graph_->get_node(input_name);
-        if (node) {
-            // Validate input shape if expected shape is known
-            if (!node->output_tensors().empty() && node->output_tensors()[0]) {
-                const auto& expected_shape = node->output_tensors()[0]->shape();
-                const auto& actual_shape = it->second->shape();
-
-                // Check shape compatibility (allow dynamic batch size)
-                if (expected_shape.ndim() > 0 && expected_shape.ndim() == actual_shape.ndim()) {
-                    bool compatible = true;
-                    for (size_t i = 0; i < expected_shape.ndim(); ++i) {
-                        // Skip dynamic dimensions (-1) or batch dimension (index 0)
-                        if (expected_shape[i] < 0 || i == 0)
-                            continue;
-
-                        if (expected_shape[i] != actual_shape[i]) {
-                            MI_LOG_ERROR(
-                                "[Engine] Input '" + input_name + "' shape mismatch: expected " +
-                                expected_shape.to_string() + ", got " + actual_shape.to_string());
-                            compatible = false;
-                            break;
-                        }
-                    }
-
-                    if (!compatible) {
-                        return core::Status::ERROR_INVALID_ARGUMENT;
-                    }
-                }
-            }
-
-            node->set_output_tensors({it->second});
-        }
+    status = bind_ordered_inputs(inputs);
+    if (status != core::Status::SUCCESS) {
+        return status;
     }
 
     // Execute all nodes (skip placeholder nodes without operator)
@@ -499,23 +516,14 @@ core::Status Engine::forward(
         if (!node || !node->get_operator()) {
             continue;
         }
-        auto status = execute_node(node);
-        if (status != core::Status::SUCCESS) {
+        auto exec_status = execute_node(node);
+        if (exec_status != core::Status::SUCCESS) {
             MI_LOG_ERROR("Node execution failed: " + node->name());
-            return status;
+            return exec_status;
         }
     }
 
-    // Collect output tensors
-    outputs.clear();
-    for (const auto& output_name : graph_->outputs()) {
-        auto node = graph_->get_node(output_name);
-        if (node && !node->output_tensors().empty()) {
-            outputs[output_name] = node->output_tensors()[0];
-        }
-    }
-
-    return core::Status::SUCCESS;
+    return collect_ordered_outputs(outputs);
 }
 
 std::vector<std::string> Engine::get_input_names() const {
@@ -764,40 +772,184 @@ core::Status Engine::execute_node(std::shared_ptr<graph::Node> node) {
     return node->get_operator()->forward(input_tensors, output_tensors);
 }
 
-bool Engine::check_shape_change(
-    const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs) {
-    // Extract current input shapes
-    std::unordered_map<std::string, core::Shape> current_shapes;
-    for (const auto& [name, tensor] : inputs) {
-        current_shapes[name] = tensor->shape();
+core::Status Engine::initialize_input_bindings() {
+    input_bindings_.clear();
+
+    if (!graph_) {
+        return core::Status::ERROR_RUNTIME;
     }
 
-    // Check if shapes changed
-    return shape_inference_engine_->shapes_changed(current_shapes);
+    const auto& input_names = graph_->inputs();
+    input_bindings_.reserve(input_names.size());
+
+    for (const auto& name : input_names) {
+        auto node = graph_->get_node(name);
+        if (!node) {
+            MI_LOG_ERROR("[Engine] Graph input node not found: " + name);
+            input_bindings_.clear();
+            return core::Status::ERROR_RUNTIME;
+        }
+
+        InputBinding binding;
+        binding.name = name;
+        binding.node_id = node->id();
+        binding.node = node.get();
+        input_bindings_.push_back(binding);
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::gather_map_inputs(
+    const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs,
+    std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs) const {
+    if (!graph_) {
+        return core::Status::ERROR_RUNTIME;
+    }
+
+    ordered_inputs.clear();
+    const auto& input_names = graph_->inputs();
+    ordered_inputs.reserve(input_names.size());
+
+    for (const auto& name : input_names) {
+        auto it = inputs.find(name);
+        if (it == inputs.end() || !it->second) {
+            MI_LOG_ERROR("[Engine] Missing input: " + name);
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+        ordered_inputs.push_back(it->second);
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::build_runtime_shapes(
+    const std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs,
+    std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes) const {
+    runtime_shapes.clear();
+    runtime_shapes.reserve(input_bindings_.size());
+
+    for (size_t idx = 0; idx < input_bindings_.size(); ++idx) {
+        const auto& tensor = ordered_inputs[idx];
+        if (!tensor) {
+            MI_LOG_ERROR("[Engine] Input tensor at index " + std::to_string(idx) + " is null");
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        ShapeInferenceEngine::RuntimeInputShape runtime_shape;
+        runtime_shape.node_id = input_bindings_[idx].node_id;
+        runtime_shape.shape = tensor->shape();
+        runtime_shapes.push_back(runtime_shape);
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::bind_ordered_inputs(
+    const std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs) {
+    for (size_t idx = 0; idx < input_bindings_.size(); ++idx) {
+        const auto& binding = input_bindings_[idx];
+        if (!binding.node) {
+            MI_LOG_ERROR("[Engine] Input binding node is null for: " + binding.name);
+            return core::Status::ERROR_RUNTIME;
+        }
+
+        const auto& tensor = ordered_inputs[idx];
+        if (!tensor) {
+            MI_LOG_ERROR("[Engine] Input tensor is null for binding: " + binding.name);
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        if (!binding.node->output_tensors().empty() && binding.node->output_tensors()[0]) {
+            const auto& expected_shape = binding.node->output_tensors()[0]->shape();
+            const auto& actual_shape = tensor->shape();
+
+            if (expected_shape.ndim() > 0 && expected_shape.ndim() == actual_shape.ndim()) {
+                bool compatible = true;
+                for (size_t i = 0; i < expected_shape.ndim(); ++i) {
+                    if (expected_shape[i] < 0 || i == 0)
+                        continue;
+
+                    if (expected_shape[i] != actual_shape[i]) {
+                        MI_LOG_ERROR("[Engine] Input '" + binding.name +
+                                     "' shape mismatch: expected " + expected_shape.to_string() +
+                                     ", got " + actual_shape.to_string());
+                        compatible = false;
+                        break;
+                    }
+                }
+
+                if (!compatible) {
+                    return core::Status::ERROR_INVALID_ARGUMENT;
+                }
+            }
+        }
+
+        binding.node->set_output_tensors({tensor});
+    }
+
+    return core::Status::SUCCESS;
+}
+
+core::Status Engine::collect_ordered_outputs(
+    std::vector<std::shared_ptr<core::Tensor>>& ordered_outputs) const {
+    if (!graph_) {
+        return core::Status::ERROR_RUNTIME;
+    }
+
+    ordered_outputs.clear();
+    const auto& output_names = graph_->outputs();
+    ordered_outputs.reserve(output_names.size());
+
+    for (const auto& output_name : output_names) {
+        auto node = graph_->get_node(output_name);
+        if (!node) {
+            MI_LOG_ERROR("[Engine] Output node not found: " + output_name);
+            return core::Status::ERROR_RUNTIME;
+        }
+
+        if (!node->output_tensors().empty()) {
+            ordered_outputs.push_back(node->output_tensors()[0]);
+        } else {
+            ordered_outputs.push_back(nullptr);
+        }
+    }
+
+    return core::Status::SUCCESS;
+}
+
+bool Engine::check_shape_change(
+    const std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes) {
+    if (!shape_inference_engine_) {
+        return false;
+    }
+    return shape_inference_engine_->shapes_changed(runtime_shapes);
 }
 
 core::Status Engine::handle_shape_change(
-    const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs) {
+    const std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes) {
     // Validate shapes against optimization profile
     if (config_.optimization_profile) {
-        std::map<std::string, core::Shape> input_shapes_map;
-        for (const auto& [name, tensor] : inputs) {
-            input_shapes_map[name] = tensor->shape();
-        }
-
-        if (!config_.optimization_profile->is_valid_for(input_shapes_map)) {
-            MI_LOG_ERROR("[Engine] Input shapes are outside optimization profile range");
+        if (runtime_shapes.size() != input_bindings_.size()) {
+            MI_LOG_ERROR("[Engine] Input binding count mismatch during profile validation");
             return core::Status::ERROR_INVALID_ARGUMENT;
         }
+        for (size_t idx = 0; idx < input_bindings_.size(); ++idx) {
+            const auto& binding = input_bindings_[idx];
+            const auto* range =
+                config_.optimization_profile->get_shape_range(binding.name);
+            if (!range) {
+                continue;
+            }
+            if (!range->contains(runtime_shapes[idx].shape)) {
+                MI_LOG_ERROR("[Engine] Input '" + binding.name +
+                             "' shape is outside optimization profile range");
+                return core::Status::ERROR_INVALID_ARGUMENT;
+            }
+        }
     }
 
-    // Re-infer shapes
-    std::unordered_map<std::string, core::Shape> input_shapes;
-    for (const auto& [name, tensor] : inputs) {
-        input_shapes[name] = tensor->shape();
-    }
-
-    auto status = shape_inference_engine_->infer_shapes(input_shapes);
+    auto status = shape_inference_engine_->infer_shapes(runtime_shapes);
     if (status != core::Status::SUCCESS) {
         MI_LOG_ERROR("[Engine] Runtime shape inference failed");
         return status;

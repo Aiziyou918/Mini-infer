@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <vector>
 #include "mini_infer/runtime/shape_inference_engine.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/operators/conv2d.h"
@@ -57,6 +58,12 @@ protected:
         graph->connect("relu1", "pool1");
         
         graph->set_outputs({"pool1"});
+
+        std::vector<std::shared_ptr<graph::Node>> topo;
+        ASSERT_EQ(graph->checked_topological_sort(topo), core::Status::SUCCESS);
+        for (size_t i = 0; i < topo.size(); ++i) {
+            topo[i]->set_id(i);
+        }
     }
     
     std::shared_ptr<graph::Graph> graph;
@@ -180,4 +187,3 @@ int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-
