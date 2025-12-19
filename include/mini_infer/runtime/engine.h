@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "mini_infer/backends/backend.h"
+#include "mini_infer/backends/device_context.h"
 #include "mini_infer/core/types.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/graph/graph_optimizer.h"
@@ -117,7 +117,7 @@ class Engine {
 
     EngineConfig config_;                                     ///< Engine config
     std::shared_ptr<graph::Graph> graph_;                     ///< Graph
-    std::shared_ptr<backends::Backend> backend_;              ///< Backend
+    std::unordered_map<core::DeviceType, std::shared_ptr<backends::DeviceContext>> contexts_;
     std::vector<std::shared_ptr<graph::Node>> sorted_nodes_;  ///< Sorted nodes
     MemoryPlan memory_plan_;                                  ///< Memory plan result
     std::vector<std::shared_ptr<void>>
@@ -176,6 +176,7 @@ class Engine {
      * @return core::Status
      */
     core::Status execute_node(std::shared_ptr<graph::Node> node);
+    std::shared_ptr<backends::DeviceContext> get_or_create_context(core::DeviceType device_type);
 
     core::Status initialize_input_bindings();
     core::Status gather_map_inputs(

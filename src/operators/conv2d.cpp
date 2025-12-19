@@ -1,14 +1,9 @@
 #include "mini_infer/operators/conv2d.h"
 
-#include <algorithm>
-#include <cstring>
 #include <vector>
 
-#include "mini_infer/core/buffer.h"
 #include "mini_infer/core/op_type.h"
-#include "mini_infer/kernels/bias.h"
-#include "mini_infer/kernels/gemm.h"
-#include "mini_infer/kernels/im2col.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 namespace mini_infer {
 namespace operators {
@@ -47,15 +42,6 @@ core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Extract input dimensions
-    int N = static_cast<int>(input_shape[0]);
-    int C_in = static_cast<int>(input_shape[1]);
-    int H_in = static_cast<int>(input_shape[2]);
-    int W_in = static_cast<int>(input_shape[3]);
-
-    int kernel_h = static_cast<int>(weight_shape[2]);
-    int kernel_w = static_cast<int>(weight_shape[3]);
-
     // Validate parameters
     if (param_.groups != 1) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
@@ -73,72 +59,19 @@ core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    int C_out = static_cast<int>(output_shape[1]);
-    int H_out = static_cast<int>(output_shape[2]);
-    int W_out = static_cast<int>(output_shape[3]);
+    kernels::KernelContext ctx;
+    ctx.inputs = &inputs;
+    ctx.outputs = &outputs;
+    ctx.op_param = &param_;
+    ctx.device_context = kernels::get_current_device_context();
 
-    // Perform computation based on data type
-    const auto dtype = input->dtype();
-
-    if (dtype == core::DataType::FLOAT32) {
-        const float* input_data = static_cast<const float*>(input->data());
-        const float* weight_data = static_cast<const float*>(weight->data());
-        float* output_data = static_cast<float*>(output->data());
-
-        // CPU-optimized: Per-batch GEMM for better cache utilization
-        // Directly produces NCHW layout without transpose overhead
-        int spatial_size = H_out * W_out;
-        int col_size_per_batch = C_in * kernel_h * kernel_w * spatial_size;
-
-        // Allocate col_buffer for single batch (better cache locality)
-        core::Buffer<float> col_buffer(col_size_per_batch);
-
-        // GEMM parameters
-        int M = C_out;
-        int N_gemm = spatial_size;
-        int K = C_in * kernel_h * kernel_w;
-
-        // Process each batch separately
-        for (int n = 0; n < N; ++n) {
-            const float* input_n = input_data + n * C_in * H_in * W_in;
-            float* output_n = output_data + n * C_out * spatial_size;
-
-            // Step 1: im2col for this batch
-            kernels::Im2ColKernel::im2col<float>(
-                input_n, col_buffer.data(), C_in, H_in, W_in, kernel_h, kernel_w, param_.stride_h,
-                param_.stride_w, param_.padding_h, param_.padding_w, param_.dilation_h,
-                param_.dilation_w, H_out, W_out);
-
-            // Step 2: GEMM for this batch
-            // weight: [C_out, K]
-            // col_buffer: [K, spatial_size]
-            // output_n: [C_out, spatial_size] (NCHW layout, naturally)
-            kernels::GEMMKernel::gemm_nn<float>(weight_data, col_buffer.data(), output_n, M, N_gemm,
-                                                K);
-        }
-
-        // Add bias if needed
-        if (param_.use_bias) {
-            const float* bias_data = static_cast<const float*>(inputs[2]->data());
-            kernels::BiasKernel::add_channel_bias<float>(output_data, bias_data,
-                                                         N,             // batch_size
-                                                         C_out,         // channels
-                                                         H_out * W_out  // spatial_size
-            );
-        }
-
-        // TensorRT-style: Apply inline activation if set
-        // This enables automatic kernel fusion without explicit fusion pass
-        if (param_.activation.is_enabled()) {
-            int total_elements = N * C_out * H_out * W_out;
-            for (int i = 0; i < total_elements; ++i) {
-                output_data[i] = apply_activation(output_data[i], param_.activation);
-            }
-        }
-
-    } else {
-        return core::Status::ERROR_INVALID_ARGUMENT;
+    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kCONVOLUTION,
+                                                           input->device());
+    if (!kernel) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
     }
+
+    kernel(&ctx);
 
     return core::Status::SUCCESS;
 }

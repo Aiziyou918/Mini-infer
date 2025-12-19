@@ -1,5 +1,7 @@
 #include "mini_infer/core/tensor.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <numeric>
 #include <sstream>
@@ -51,11 +53,80 @@ bool Shape::operator==(const Shape& other) const {
 }
 
 // ============================================================================
+// Storage implementation
+// ============================================================================
+
+Storage::Storage(size_t capacity_bytes, DeviceType device, size_t alignment) {
+    reset(capacity_bytes, device, alignment);
+}
+
+Storage::Storage(const std::shared_ptr<void>& external, size_t capacity_bytes, DeviceType device)
+    : buffer_(external), capacity_(capacity_bytes), device_(device) {}
+
+void Storage::reset(size_t capacity_bytes, DeviceType device, size_t alignment) {
+    if (capacity_bytes == 0) {
+        buffer_.reset();
+        capacity_ = 0;
+        device_ = device;
+        return;
+    }
+
+    device_ = device;
+    size_t aligned_bytes = ((capacity_bytes + alignment - 1) / alignment) * alignment;
+
+    auto allocator_type = device == DeviceType::CPU ? AllocatorFactory::AllocatorType::CPU
+                                                    : AllocatorFactory::AllocatorType::CUDA;
+    auto allocator = AllocatorFactory::get_allocator(allocator_type);
+    if (!allocator) {
+        buffer_.reset();
+        capacity_ = 0;
+        return;
+    }
+
+    void* ptr = allocator->allocate(aligned_bytes, alignment);
+    if (!ptr) {
+        buffer_.reset();
+        capacity_ = 0;
+        return;
+    }
+
+    buffer_.reset(ptr, [allocator](void* p) {
+        allocator->deallocate(p);
+    });
+    std::memset(ptr, 0, aligned_bytes);
+    capacity_ = aligned_bytes;
+}
+
+void Storage::set_external(const std::shared_ptr<void>& external, size_t capacity_bytes,
+                           DeviceType device) {
+    buffer_ = external;
+    capacity_ = capacity_bytes;
+    device_ = device;
+}
+
+// ============================================================================
 // Tensor implementation
 // ============================================================================
 
-Tensor::Tensor(const Shape& shape, DataType dtype) : shape_(shape), dtype_(dtype) {
+Tensor::Tensor(const Shape& shape, DataType dtype, DeviceType device, size_t alignment)
+    : shape_(shape), dtype_(dtype), device_(device), alignment_(alignment) {
     allocate();
+}
+
+void* Tensor::data() {
+    if (!storage_ || storage_->empty()) {
+        return nullptr;
+    }
+    auto base = static_cast<uint8_t*>(storage_->data());
+    return base ? base + storage_offset_ : nullptr;
+}
+
+const void* Tensor::data() const {
+    if (!storage_ || storage_->empty()) {
+        return nullptr;
+    }
+    auto base = static_cast<const uint8_t*>(storage_->data());
+    return base ? base + storage_offset_ : nullptr;
 }
 
 size_t Tensor::element_size() const {
@@ -80,87 +151,127 @@ size_t Tensor::element_size() const {
 }
 
 size_t Tensor::size_in_bytes() const {
-    return shape_.numel() * element_size();
+    return static_cast<size_t>(shape_.numel()) * element_size();
 }
 
 void Tensor::allocate() {
     size_t bytes = size_in_bytes();
-    if (bytes > 0) {
-        void* ptr = CPUAllocator::get_instance()->allocate(bytes);
-        data_ = std::shared_ptr<void>(ptr,
-                                      [](void* p) { CPUAllocator::get_instance()->deallocate(p); });
-        // Initialize to 0
-        std::memset(ptr, 0, bytes);
-        capacity_ = bytes;
+    if (bytes == 0) {
+        storage_.reset();
+        storage_offset_ = 0;
+        strides_.clear();
+        return;
     }
+
+    storage_ = std::make_shared<Storage>(bytes, device_, alignment_);
+    storage_offset_ = 0;
+    compute_contiguous_strides();
 }
 
 void Tensor::reshape(const Shape& new_shape) {
     if (new_shape.numel() != shape_.numel()) {
-        // The number of elements must be the same
         return;
     }
     shape_ = new_shape;
+    compute_contiguous_strides();
+}
+
+void Tensor::ensure_contiguous_storage(size_t new_size_bytes) {
+    if (new_size_bytes == 0) {
+        storage_.reset();
+        storage_offset_ = 0;
+        return;
+    }
+
+    size_t available = 0;
+    bool unique_storage = false;
+    if (storage_) {
+        available = storage_->capacity() > storage_offset_
+                        ? storage_->capacity() - storage_offset_
+                        : 0;
+        unique_storage = (storage_.use_count() == 1 && storage_offset_ == 0);
+    }
+
+    if (storage_ && unique_storage && new_size_bytes <= available) {
+        return;
+    }
+
+    auto new_storage = std::make_shared<Storage>(new_size_bytes, device_, alignment_);
+    if (storage_ && storage_->data()) {
+        size_t copy_size = std::min(size_in_bytes(), new_size_bytes);
+        if (copy_size > 0) {
+            std::memcpy(new_storage->data(), data(), copy_size);
+        }
+    }
+
+    storage_ = new_storage;
+    storage_offset_ = 0;
 }
 
 void Tensor::resize(const Shape& new_shape) {
-    size_t new_size = new_shape.numel() * element_size();
+    size_t new_size = static_cast<size_t>(new_shape.numel()) * element_size();
+    size_t old_size = size_in_bytes();
 
-    // Smart reallocation: only reallocate if new size exceeds capacity
-    if (new_size <= capacity_) {
-        // Reuse existing buffer
-        shape_ = new_shape;
-        return;
-    }
-
-    // Need to reallocate
-    void* new_ptr = CPUAllocator::get_instance()->allocate(new_size);
-    if (!new_ptr) {
-        return;  // Allocation failed
-    }
-
-    // Initialize new memory to 0
-    std::memset(new_ptr, 0, new_size);
-
-    // Copy old data if exists (up to min of old/new size)
-    if (data_) {
-        size_t old_size = size_in_bytes();
-        size_t copy_size = std::min(old_size, new_size);
-        std::memcpy(new_ptr, data_.get(), copy_size);
-    }
-
-    // Replace data pointer
-    data_ = std::shared_ptr<void>(new_ptr,
-                                  [](void* p) { CPUAllocator::get_instance()->deallocate(p); });
-    capacity_ = new_size;
+    ensure_contiguous_storage(new_size);
     shape_ = new_shape;
+    compute_contiguous_strides();
+
+    if (storage_ && storage_->data() && new_size > old_size) {
+        auto ptr = static_cast<uint8_t*>(data());
+        if (ptr) {
+            std::memset(ptr + old_size, 0, new_size - old_size);
+        }
+    }
 }
 
 std::shared_ptr<Tensor> Tensor::view(const Shape& new_shape) const {
-    // Check that the total number of elements matches
     if (new_shape.numel() != shape_.numel()) {
-        return nullptr;  // Invalid view
+        return nullptr;
     }
 
-    // Create a new Tensor object
     auto view_tensor = std::make_shared<Tensor>();
     view_tensor->shape_ = new_shape;
     view_tensor->dtype_ = dtype_;
-    view_tensor->data_ = data_;  // Share the same data pointer (zero-copy!)
-
+    view_tensor->storage_ = storage_;
+    view_tensor->storage_offset_ = storage_offset_;
+    view_tensor->device_ = device_;
+    view_tensor->alignment_ = alignment_;
+    view_tensor->compute_contiguous_strides();
     return view_tensor;
 }
 
-std::shared_ptr<Tensor> Tensor::create(const Shape& shape, DataType dtype) {
-    return std::make_shared<Tensor>(shape, dtype);
+std::shared_ptr<Tensor> Tensor::create(const Shape& shape, DataType dtype, DeviceType device) {
+    return std::make_shared<Tensor>(shape, dtype, device);
 }
 
-void Tensor::bind_external_data(const std::shared_ptr<void>& data) {
-    data_ = data;
+void Tensor::bind_external_data(const std::shared_ptr<void>& data, size_t capacity_bytes,
+                                DeviceType device) {
+    if (!storage_) {
+        storage_ = std::make_shared<Storage>(data, capacity_bytes, device);
+    } else {
+        storage_->set_external(data, capacity_bytes, device);
+    }
+    storage_offset_ = 0;
+    device_ = device;
+    compute_contiguous_strides();
 }
 
 void Tensor::set_shape_metadata(const Shape& shape) {
     shape_ = shape;
+    compute_contiguous_strides();
+}
+
+void Tensor::compute_contiguous_strides() {
+    strides_.assign(shape_.ndim(), 0);
+    if (shape_.ndim() == 0) {
+        return;
+    }
+
+    int64_t stride = 1;
+    for (int64_t idx = static_cast<int64_t>(shape_.ndim()) - 1; idx >= 0; --idx) {
+        strides_[static_cast<size_t>(idx)] = stride;
+        stride *= shape_[static_cast<size_t>(idx)];
+    }
 }
 
 }  // namespace core

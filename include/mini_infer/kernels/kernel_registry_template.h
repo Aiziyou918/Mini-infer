@@ -13,11 +13,11 @@ namespace kernels {
  * Eliminates code duplication without macros.
  * 
  * Usage:
- * using GEMMRegistry_NN = KernelRegistry<GEMMFunc_NN>;
+ * using GEMMRegistry_NN = KernelRegistryTemplate<GEMMFunc_NN>;
  * GEMMRegistry_NN<float>::instance().register_kernel(...);
  */
 template<template<typename> class FuncType>
-class KernelRegistry {
+class KernelRegistryTemplate {
 public:
     template<typename T>
     class ForType : public KernelRegistryBase<FuncType<T>> {
@@ -38,13 +38,13 @@ public:
  * @brief Type alias for cleaner syntax
  * 
  * Instead of:
- *   KernelRegistry<GEMMFunc_NN>::ForType<float>::instance()
+ *   KernelRegistryTemplate<GEMMFunc_NN>::ForType<float>::instance()
  * 
  * Use:
  *   GEMMRegistry_NN<float>::instance()
  */
 template<typename T, template<typename> class FuncType>
-using KernelRegistryFor = typename KernelRegistry<FuncType>::template ForType<T>;
+using KernelRegistryFor = typename KernelRegistryTemplate<FuncType>::template ForType<T>;
 
 // Example: Define registry alias
 #define DEFINE_REGISTRY_ALIAS(Name, FuncType) \

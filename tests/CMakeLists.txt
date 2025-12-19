@@ -2,7 +2,6 @@
 
 set(TEST_SOURCES
     test_tensor.cpp
-    test_backend.cpp
     test_graph.cpp
     test_operators.cpp
     test_linear.cpp

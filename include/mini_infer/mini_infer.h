@@ -11,8 +11,7 @@
 #include "mini_infer/core/types.h"
 
 // Backends
-#include "mini_infer/backends/backend.h"
-#include "mini_infer/backends/cpu_backend.h"
+#include "mini_infer/backends/device_context.h"
 
 // Operators
 #include "mini_infer/operators/operator.h"
@@ -70,7 +69,6 @@
  * auto tensor = core::Tensor::create(shape, core::DataType::FLOAT32);
  * 
  * // 创建后端
- * auto backend = backends::BackendFactory::get_default_backend();
  * 
  * // 构建计算图
  * auto graph = std::make_shared<graph::Graph>();

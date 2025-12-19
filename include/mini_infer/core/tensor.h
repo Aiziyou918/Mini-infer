@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "mini_infer/core/types.h"
+#include "mini_infer/core/allocator.h"
+
 namespace mini_infer {
 namespace core {
 
@@ -91,10 +94,46 @@ class Shape {
 /**
  * @brief Tensor Class - The basic data structure of the inference framework
  */
+class Storage {
+   public:
+    Storage() = default;
+    Storage(size_t capacity_bytes, DeviceType device, size_t alignment = kDefaultAlignment);
+    Storage(const std::shared_ptr<void>& external, size_t capacity_bytes,
+            DeviceType device = DeviceType::CPU);
+    ~Storage() = default;
+
+    void reset(size_t capacity_bytes, DeviceType device, size_t alignment = kDefaultAlignment);
+    // The caller must provide a shared_ptr with the correct deleter for the external buffer.
+    void set_external(const std::shared_ptr<void>& external, size_t capacity_bytes,
+                      DeviceType device);
+
+    void* data() const {
+        return buffer_.get();
+    }
+
+    size_t capacity() const {
+        return capacity_;
+    }
+
+    DeviceType device() const {
+        return device_;
+    }
+
+    bool empty() const {
+        return buffer_ == nullptr;
+    }
+
+   private:
+    std::shared_ptr<void> buffer_;
+    size_t capacity_{0};
+    DeviceType device_{DeviceType::CPU};
+};
+
 class Tensor {
    public:
     Tensor() = default;
-    Tensor(const Shape& shape, DataType dtype);
+    Tensor(const Shape& shape, DataType dtype, DeviceType device = DeviceType::CPU,
+           size_t alignment = kDefaultAlignment);
     ~Tensor() = default;
 
     // Disable copy, allow move
@@ -103,135 +142,81 @@ class Tensor {
     Tensor(Tensor&&) noexcept = default;
     Tensor& operator=(Tensor&&) noexcept = default;
 
-    // Accessors
-    /**
-     * @brief Get the shape of the tensor
-     * @return The shape of the tensor
-     */
     const Shape& shape() const {
         return shape_;
     }
 
-    /**
-     * @brief Get the data type of the tensor
-     * @return The data type of the tensor
-     */
     DataType dtype() const {
         return dtype_;
     }
 
-    /**
-     * @brief Get the data of the tensor
-     * @return The data of the tensor
-     */
-    void* data() {
-        return data_.get();
+    DeviceType device() const {
+        return device_;
     }
 
-    /**
-     * @brief Get the data of the tensor
-     * @return The data of the tensor
-     */
-    const void* data() const {
-        return data_.get();
+    const std::vector<int64_t>& strides() const {
+        return strides_;
     }
 
-    /**
-     * @brief Get the size of the tensor in bytes
-     *
-     * @return The size of the tensor in bytes
-     */
+    size_t storage_offset() const {
+        return storage_offset_;
+    }
+
+    void* data();
+    const void* data() const;
+
     size_t size_in_bytes() const;
 
-    // Utility methods
-    /**
-     * @brief Check if the tensor is empty
-     * @return True if the tensor is empty, false otherwise
-     */
     bool empty() const {
-        return data_ == nullptr;
+        return !storage_ || storage_->empty();
     }
 
-    /**
-     * @brief Reshape the tensor in-place
-     * @param new_shape The new shape of the tensor
-     */
     void reshape(const Shape& new_shape);
-
-    /**
-     * @brief Resize the tensor with new shape (may reallocate memory)
-     * @param new_shape The new shape of the tensor
-     *
-     * Smart reallocation strategy:
-     * - If new size <= capacity: reuse buffer, only update shape
-     * - If new size > capacity: reallocate buffer and update capacity
-     */
     void resize(const Shape& new_shape);
 
-    /**
-     * @brief Get the capacity (allocated buffer size) in bytes
-     * @return The capacity in bytes
-     */
     size_t capacity() const {
-        return capacity_;
+        return storage_ ? storage_->capacity() : 0;
     }
 
-    /**
-     * @brief Create a view of the tensor with a different shape (zero-copy)
-     * The new tensor shares the same underlying data but has a different shape.
-     * @param new_shape The new shape of the view
-     * @return A new tensor that shares data with this tensor
-     */
+    // Reshape-only view: shares storage and keeps the same offset/contiguous layout.
     std::shared_ptr<Tensor> view(const Shape& new_shape) const;
 
-    /**
-     * @brief Create a tensor
-     * @param shape The shape of the tensor
-     * @param dtype The data type of the tensor
-     * @return The created tensor
-     */
-    static std::shared_ptr<Tensor> create(const Shape& shape, DataType dtype);
+    static std::shared_ptr<Tensor> create(const Shape& shape, DataType dtype,
+                                          DeviceType device = DeviceType::CPU);
 
     /**
      * @brief Bind an externally allocated buffer to this tensor.
      *
+     * @param data Shared ownership of the external buffer
+     * @param capacity_bytes Capacity of the external buffer in bytes
+     * @param device Device where the external buffer resides
+     *
      * Used by the runtime memory planner to let multiple tensors share
      * the same preallocated memory pool.
      */
-    void bind_external_data(const std::shared_ptr<void>& data);
+    void bind_external_data(const std::shared_ptr<void>& data, size_t capacity_bytes,
+                            DeviceType device = DeviceType::CPU);
 
-    /**
-     * @brief Set metadata shape without touching allocation
-     *
-     * Allows importer to record symbolic shapes (with -1) before concrete
-     * allocations happen during build/runtime.
-     */
     void set_shape_metadata(const Shape& shape);
 
-    /**
-     * @brief Set dtype metadata without allocating
-     */
     void set_dtype(DataType dtype) {
         dtype_ = dtype;
     }
 
-    /**
-     * @brief Get the size of the element in the tensor
-     * @return The size of the element in the tensor
-     */
     size_t element_size() const;
 
    private:
-    Shape shape_;                        ///< The shape of the tensor
-    DataType dtype_{DataType::FLOAT32};  ///< The data type of the tensor
-    std::shared_ptr<void> data_;         ///< The data of the tensor
-    size_t capacity_{0};                 ///< Allocated buffer size in bytes
-
-    /**
-     * @brief Allocate the memory for the tensor
-     * @return The size of the tensor in bytes
-     */
     void allocate();
+    void ensure_contiguous_storage(size_t new_size_bytes);
+    void compute_contiguous_strides();
+
+    Shape shape_;
+    DataType dtype_{DataType::FLOAT32};
+    std::shared_ptr<Storage> storage_;
+    size_t storage_offset_{0};
+    std::vector<int64_t> strides_;
+    DeviceType device_{DeviceType::CPU};
+    size_t alignment_{kDefaultAlignment};
 };
 
 }  // namespace core

@@ -4,6 +4,7 @@ set(KERNEL_SOURCES
     cpu/gemm_cpu.cpp
     cpu/im2col_cpu.cpp
     cpu/bias_cpu.cpp
+    cpu/conv2d_cpu.cpp
     cpu/transpose_cpu.cpp
     cpu/pooling_cpu.cpp
 )

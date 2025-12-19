@@ -4,13 +4,14 @@
 #include <cstring>
 
 #include "mini_infer/core/allocator.h"
+#include "mini_infer/kernels/kernel_registry.h"
 #include "mini_infer/utils/logger.h"
 
 namespace mini_infer {
 namespace runtime {
 
 Engine::Engine(const EngineConfig& config) : config_(config) {
-    backend_ = backends::BackendFactory::create_backend(config_.device_type);
+    contexts_.emplace(core::DeviceType::CPU, std::make_shared<backends::CPUDeviceContext>());
 }
 
 core::Status Engine::build(std::shared_ptr<graph::Graph> graph) {
@@ -592,7 +593,8 @@ core::Status Engine::prepare_memory_pools(bool use_memory_pools) {
     for (const auto& pool : memory_plan_.pools) {
         void* raw = nullptr;
         if (pool.size_bytes > 0) {
-            raw = core::CPUAllocator::get_instance()->allocate(pool.size_bytes);
+            raw = core::CPUAllocator::get_instance()->allocate(pool.size_bytes,
+                                                               config_.memory_alignment);
         }
 
         if (!raw && pool.size_bytes > 0) {
@@ -722,7 +724,8 @@ Engine::PoolBindResult Engine::try_bind_tensor_to_pool(const std::string& tensor
         return PoolBindResult::kFailed;
     }
 
-    tensor->bind_external_data(memory_pool_buffers_[pool_id]);
+    tensor->bind_external_data(memory_pool_buffers_[pool_id],
+                               memory_plan_.pools[static_cast<size_t>(pool_id)].size_bytes);
     allocated_count++;
 
     if (config_.enable_profiling) {
@@ -767,9 +770,45 @@ core::Status Engine::execute_node(std::shared_ptr<graph::Node> node) {
         input_tensors.swap(merged);
     }
 
+    core::DeviceType device_type = config_.device_type;
+    for (const auto& tensor : input_tensors) {
+        if (tensor) {
+            device_type = tensor->device();
+            break;
+        }
+    }
+
+    auto context = get_or_create_context(device_type);
+    if (!context) {
+        MI_LOG_ERROR("[Engine] No device context for device type");
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
+
+    auto* previous_context = kernels::get_current_device_context();
+    kernels::set_current_device_context(context.get());
+
     // Execute operator
     auto& output_tensors = node->output_tensors();
-    return node->get_operator()->forward(input_tensors, output_tensors);
+    auto status = node->get_operator()->forward(input_tensors, output_tensors);
+
+    kernels::set_current_device_context(previous_context);
+    return status;
+}
+
+std::shared_ptr<backends::DeviceContext> Engine::get_or_create_context(
+    core::DeviceType device_type) {
+    auto it = contexts_.find(device_type);
+    if (it != contexts_.end()) {
+        return it->second;
+    }
+
+    if (device_type == core::DeviceType::CPU) {
+        auto context = std::make_shared<backends::CPUDeviceContext>();
+        contexts_.emplace(device_type, context);
+        return context;
+    }
+
+    return nullptr;
 }
 
 core::Status Engine::initialize_input_bindings() {

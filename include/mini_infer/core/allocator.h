@@ -2,11 +2,16 @@
 
 #include <cstddef>
 #include <memory>
-#include <unordered_map>
+
+#if defined(MINI_INFER_DEBUG)
 #include <mutex>
+#include <unordered_map>
+#endif
 
 namespace mini_infer {
 namespace core {
+
+constexpr size_t kDefaultAlignment = 64;
 
 /**
  * @brief Base class for memory allocators
@@ -18,9 +23,10 @@ public:
     /**
      * @brief Allocate memory
      * @param size The size of the memory to allocate
+     * @param alignment Desired memory alignment in bytes
      * @return A pointer to the allocated memory
      */
-    virtual void* allocate(size_t size) = 0;
+    virtual void* allocate(size_t size, size_t alignment = kDefaultAlignment) = 0;
 
     /**
      * @brief Deallocate memory
@@ -30,7 +36,7 @@ public:
     virtual void deallocate(void* ptr) = 0;
     
     /**
-     * @brief Get the total amount of memory allocated
+     * @brief Get the total amount of memory allocated (debug only)
      * @return The total amount of memory allocated
      */
     virtual size_t total_allocated() const { return 0; }
@@ -46,7 +52,7 @@ public:
      * @param size The size of the memory to allocate
      * @return A pointer to the allocated memory
      */
-    void* allocate(size_t size) override;
+    void* allocate(size_t size, size_t alignment = kDefaultAlignment) override;
 
     /**
      * @brief Deallocate memory on the CPU
@@ -54,6 +60,7 @@ public:
      */
     void deallocate(void* ptr) override;
 
+#if defined(MINI_INFER_DEBUG)
     /**
      * @brief Get the total amount of memory currently allocated
      * @return The total amount of memory currently allocated in bytes
@@ -71,7 +78,12 @@ public:
      * @return The number of active allocations
      */
     size_t allocation_count() const;
-    
+#else
+    size_t total_allocated() const override { return 0; }
+    size_t peak_allocated() const { return 0; }
+    size_t allocation_count() const { return 0; }
+#endif
+
     /**
      * @brief Get the instance of the CPUAllocator
      * @return The instance of the CPUAllocator
@@ -80,11 +92,13 @@ public:
     
 private:
     CPUAllocator() = default;
-    
+
+#if defined(MINI_INFER_DEBUG)
     mutable std::mutex mutex_;                       ///< Mutex for thread safety
     std::unordered_map<void*, size_t> allocations_;  ///< Track allocation sizes
     size_t total_allocated_{0};                      ///< Current total allocated
     size_t peak_allocated_{0};                       ///< Peak memory usage
+#endif
 };
 
 /**
@@ -102,4 +116,3 @@ public:
 
 } // namespace core
 } // namespace mini_infer
-
