@@ -1,7 +1,6 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/importers/operator_importer.h"
 #include "mini_infer/utils/logger.h"
 
 #include <iostream>
@@ -20,13 +19,6 @@ int main(int argc, char* argv[]) {
     // Create ONNX parser
     importers::OnnxParser parser;
     parser.set_verbose(true);
-    
-    // Show supported operators
-    auto supported_ops = parser.get_registry().get_supported_operators();
-    MI_LOG_INFO("Supported operators (" + std::to_string(supported_ops.size()) + "):");
-    for (const auto& op : supported_ops) {
-        MI_LOG_INFO("  - " + op);
-    }
     
     // Parse ONNX model
     MI_LOG_INFO("Parsing ONNX model: " + model_path);

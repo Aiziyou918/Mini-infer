@@ -19,7 +19,8 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/utils/logger.h"
 #include "utils/simple_loader.h"
 
@@ -71,7 +72,8 @@ std::vector<float> softmax(const std::shared_ptr<core::Tensor>& logits) {
  * @brief Test LeNet-5 ONNX model
  */
 void test_lenet5_onnx(
-    std::shared_ptr<runtime::Engine> engine,
+    std::shared_ptr<runtime::InferencePlan> plan,
+    runtime::ExecutionContext& ctx,
     const std::string& input_name,
     const std::string& output_name,
     const std::string& samples_dir,
@@ -136,8 +138,10 @@ void test_lenet5_onnx(
             inputs[input_name] = input_tensor;
             
             // Execute inference
-            std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-            auto status = engine->forward(inputs, outputs);
+            auto status = ctx.set_inputs(inputs);
+            if (status == core::Status::SUCCESS) {
+                status = plan->execute(&ctx);
+            }
             
             if (status != core::Status::SUCCESS) {
                 std::cerr << "Error: Inference failed for " 
@@ -146,7 +150,9 @@ void test_lenet5_onnx(
             }
             
             // Get output
-            auto output_tensor = outputs[output_name];
+            auto outputs = ctx.named_outputs();
+            auto it = outputs.find(output_name);
+            auto output_tensor = it != outputs.end() ? it->second : nullptr;
             if (!output_tensor) {
                 std::cerr << "Error: Output tensor not found for " 
                           << filepath.filename() << std::endl;
@@ -380,7 +386,7 @@ int main(int argc, char** argv) {
         importers::OnnxParser parser;
         parser.set_verbose(verbose);
         
-        // Parse to unique_ptr, need to convert to shared_ptr to match Engine::build interface
+        // Parse to unique_ptr, need to convert to shared_ptr to match plan build interface
         auto graph_uptr = parser.parse_from_file(model_path);
         
         if (!graph_uptr) {
@@ -393,27 +399,33 @@ int main(int argc, char** argv) {
         std::cout << "Graph has " << graph->nodes().size() << " nodes" << std::endl;
         std::cout << std::endl;
         
-        // Step 2: Build Runtime Engine
-        std::cout << "Step 2: Building Runtime Engine" << std::endl;
+        // Step 2: Build Inference Plan
+        std::cout << "Step 2: Building Inference Plan" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
         
         runtime::EngineConfig config;
         config.device_type = core::DeviceType::CPU;
         config.enable_profiling = false;
         
-        auto engine = std::make_shared<runtime::Engine>(config);
-        auto status = engine->build(graph);
+        auto plan = std::make_shared<runtime::InferencePlan>(config);
+        auto status = plan->build(graph);
         
         if (status != core::Status::SUCCESS) {
-            std::cerr << "Failed to build engine" << std::endl;
+            std::cerr << "Failed to build plan" << std::endl;
             return 1;
         }
         
-        std::cout << "[SUCCESS] Engine built successfully!" << std::endl;
+        auto ctx = plan->create_execution_context();
+        if (!ctx) {
+            std::cerr << "Failed to create execution context" << std::endl;
+            return 1;
+        }
+
+        std::cout << "[SUCCESS] Plan built successfully!" << std::endl;
         
         // Get input and output names
-        auto input_names = engine->get_input_names();
-        auto output_names = engine->get_output_names();
+        auto input_names = plan->get_input_names();
+        auto output_names = plan->get_output_names();
         
         std::cout << "  Inputs: ";
         for (const auto& name : input_names) {
@@ -436,14 +448,8 @@ int main(int argc, char** argv) {
         std::cout << "Step 3: Running Tests" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
         
-        test_lenet5_onnx(
-            engine,
-            input_names[0],
-            output_names[0],
-            samples_dir,
-            num_samples,
-            output_json
-        );
+        test_lenet5_onnx(plan, *ctx, input_names[0], output_names[0], samples_dir, num_samples,
+                         output_json);
         
         std::cout << "\n[SUCCESS] ONNX inference test completed successfully!" << std::endl;
         

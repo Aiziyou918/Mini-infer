@@ -1,6 +1,6 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
-#include "mini_infer/importers/weight_importer.h"
+#include "importers/internal/weight_importer.h"
 #include "onnx.pb.h"
 
 #include <cstring>
@@ -35,14 +35,13 @@ std::shared_ptr<core::Tensor> WeightImporter::import_tensor(
     if (tensor_proto.has_raw_data()) {
         // Raw binary data (most efficient)
         size_t expected_size = num_elements * tensor->element_size();
-        if (!import_raw_data(tensor_proto, data, expected_size)) {
-            error_message = "Failed to import raw data";
+        if (!import_raw_data(tensor_proto, data, expected_size, error_message)) {
             return nullptr;
         }
     } else {
         // Typed data arrays
-        if (!import_typed_data(tensor_proto, data, dtype, num_elements)) {
-            error_message = "Failed to import typed data";
+        size_t expected_size = num_elements * tensor->element_size();
+        if (!import_typed_data(tensor_proto, data, expected_size, error_message)) {
             return nullptr;
         }
     }
@@ -88,10 +87,13 @@ size_t WeightImporter::get_data_type_size(int onnx_dtype) {
 bool WeightImporter::import_raw_data(
     const onnx::TensorProto& tensor_proto,
     void* data,
-    size_t expected_size
+    size_t expected_size,
+    std::string& error_message
 ) {
     const std::string& raw = tensor_proto.raw_data();
     if (raw.size() != expected_size) {
+        error_message = "Raw data size mismatch: expected " + std::to_string(expected_size) +
+                        ", got " + std::to_string(raw.size());
         return false;
     }
     std::memcpy(data, raw.data(), raw.size());
@@ -101,12 +103,25 @@ bool WeightImporter::import_raw_data(
 bool WeightImporter::import_typed_data(
     const onnx::TensorProto& tensor_proto,
     void* data,
-    core::DataType dtype,
-    size_t num_elements
+    size_t data_size,
+    std::string& error_message
 ) {
-    switch (dtype) {
-        case core::DataType::FLOAT32: {
+    const int onnx_dtype = tensor_proto.data_type();
+    const size_t element_size = get_data_type_size(onnx_dtype);
+    if (element_size == 0) {
+        error_message = "Unsupported ONNX data type: " + std::to_string(onnx_dtype);
+        return false;
+    }
+    if (data_size % element_size != 0) {
+        error_message = "Typed data size is not aligned to element size";
+        return false;
+    }
+    const size_t num_elements = data_size / element_size;
+
+    switch (onnx_dtype) {
+        case onnx::TensorProto::FLOAT: {
             if (tensor_proto.float_data_size() != static_cast<int>(num_elements)) {
+                error_message = "FLOAT data size mismatch";
                 return false;
             }
             float* float_data = static_cast<float*>(data);
@@ -115,8 +130,9 @@ bool WeightImporter::import_typed_data(
             }
             return true;
         }
-        case core::DataType::INT32: {
+        case onnx::TensorProto::INT32: {
             if (tensor_proto.int32_data_size() != static_cast<int>(num_elements)) {
+                error_message = "INT32 data size mismatch";
                 return false;
             }
             int32_t* int_data = static_cast<int32_t*>(data);
@@ -125,8 +141,9 @@ bool WeightImporter::import_typed_data(
             }
             return true;
         }
-        case core::DataType::INT64: {
+        case onnx::TensorProto::INT64: {
             if (tensor_proto.int64_data_size() != static_cast<int>(num_elements)) {
+                error_message = "INT64 data size mismatch";
                 return false;
             }
             int64_t* int64_data = static_cast<int64_t*>(data);
@@ -136,6 +153,8 @@ bool WeightImporter::import_typed_data(
             return true;
         }
         default:
+            error_message = "Typed data not supported for ONNX data type: " +
+                            std::to_string(onnx_dtype);
             return false;
     }
 }

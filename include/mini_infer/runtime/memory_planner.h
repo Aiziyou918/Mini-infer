@@ -52,6 +52,8 @@ struct MemoryPool {
 struct MemoryPlan {
     std::vector<MemoryPool> pools;                        // All memory pools
     std::unordered_map<std::string, int> tensor_to_pool;  // Tensor -> Pool ID mapping
+    std::unordered_map<std::string, size_t> tensor_offsets;  // Tensor -> Offset mapping
+    size_t shared_buffer_size{0};                            // Shared buffer size in bytes
     size_t total_memory;                                  // Total memory usage
     size_t original_memory;                               // Original memory usage before optimization
     float memory_saving_ratio;                            // Memory saving ratio
@@ -62,9 +64,13 @@ struct MemoryPlan {
      * @brief Compute statistics
      */
     void compute_statistics() {
-        total_memory = 0;
-        for (const auto& pool : pools) {
-            total_memory += pool.size_bytes;
+        if (shared_buffer_size > 0) {
+            total_memory = shared_buffer_size;
+        } else {
+            total_memory = 0;
+            for (const auto& pool : pools) {
+                total_memory += pool.size_bytes;
+            }
         }
 
         if (original_memory > 0) {
@@ -210,6 +216,11 @@ class MemoryPlanner {
                                std::vector<TensorLifetime>& lifetimes);
 
     /**
+     * @brief Allocate offsets in a shared buffer (linear-scan)
+     */
+    MemoryPlan allocate_offsets(std::vector<TensorLifetime>& lifetimes);
+
+    /**
      * @brief Find available memory pool for Tensor
      *
      * @return Pool ID, -1 means new pool is needed
@@ -221,6 +232,8 @@ class MemoryPlanner {
      * @brief Align memory size
      */
     size_t align_size(size_t size) const;
+
+    size_t align_offset(size_t offset) const;
 
     /**
      * @brief Print memory planning result

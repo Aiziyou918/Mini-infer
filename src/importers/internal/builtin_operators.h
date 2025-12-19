@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mini_infer/importers/operator_importer.h"
+#include "importers/internal/operator_importer.h"
 
 namespace mini_infer {
 namespace importers {

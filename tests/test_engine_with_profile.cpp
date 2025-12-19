@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/runtime/optimization_profile.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/operators/conv2d.h"
@@ -63,8 +63,8 @@ TEST(EngineWithProfileTest, BasicUsage) {
     config.optimization_profile = profile;
     config.enable_profiling = true;
     
-    Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    auto status = plan->build(graph);
     
     EXPECT_EQ(status, core::Status::SUCCESS);
     
@@ -96,8 +96,8 @@ TEST(EngineWithProfileTest, WithoutProfile) {
     EngineConfig config;
     config.enable_dynamic_shapes = false;  // Disabled
     
-    Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    auto status = plan->build(graph);
     
     EXPECT_EQ(status, core::Status::SUCCESS);
     
@@ -110,5 +110,4 @@ int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-
 

@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "mini_infer/core/op_type.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 namespace mini_infer {
 namespace operators {
@@ -38,28 +39,18 @@ core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inp
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Calculate total number of elements
-    size_t total_elements = static_cast<size_t>(input_shape.numel());
+    kernels::KernelContext ctx;
+    ctx.inputs = &inputs;
+    ctx.outputs = &outputs;
+    ctx.device_context = kernels::get_current_device_context();
 
-    // Execute ReLU calculation based on data type
-    if (input_dtype == core::DataType::FLOAT32) {
-        const float* input_data = static_cast<const float*>(input->data());
-        float* output_data = static_cast<float*>(output->data());
-
-        for (size_t i = 0; i < total_elements; ++i) {
-            output_data[i] = std::max(0.0f, input_data[i]);
-        }
-    } else if (input_dtype == core::DataType::INT32) {
-        const int32_t* input_data = static_cast<const int32_t*>(input->data());
-        int32_t* output_data = static_cast<int32_t*>(output->data());
-
-        for (size_t i = 0; i < total_elements; ++i) {
-            output_data[i] = std::max(0, input_data[i]);
-        }
-    } else {
-        // Unsupported data type
-        return core::Status::ERROR_INVALID_ARGUMENT;
+    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kRELU, input->device(),
+                                                           input_dtype);
+    if (!kernel) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
     }
+
+    kernel(&ctx);
 
     return core::Status::SUCCESS;
 }

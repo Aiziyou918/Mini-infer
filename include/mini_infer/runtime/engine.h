@@ -2,221 +2,46 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "mini_infer/backends/device_context.h"
-#include "mini_infer/core/types.h"
-#include "mini_infer/graph/graph.h"
-#include "mini_infer/graph/graph_optimizer.h"
-#include "mini_infer/runtime/memory_planner.h"
-#include "mini_infer/runtime/optimization_profile.h"
-#include "mini_infer/runtime/shape_inference_engine.h"
-
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 
 namespace mini_infer {
 namespace runtime {
 
 /**
- * @brief Config Inference Engine (TensorRT-style)
- */
-struct EngineConfig {
-    core::DeviceType device_type{core::DeviceType::CPU};
-    int32_t device_id{0};
-    bool enable_profiling{false};
-    bool enable_graph_optimization{true};           // Enable graph optimization
-    bool enable_memory_planning{true};              // Enable memory planning
-    size_t memory_alignment{256};                   // Memory alignment (bytes)
-    size_t max_workspace_size{1024 * 1024 * 1024};  // 1GB
-
-    // Dynamic shape support
-    bool enable_dynamic_shapes{false};                          // Enable dynamic shape support
-    std::shared_ptr<OptimizationProfile> optimization_profile;  // Shape ranges for inputs
-};
-
-/**
- * @brief Inference Engine
- * Execute the graph and manage the inference process
+ * @brief Legacy Engine wrapper
+ *
+ * Delegates build-time work to InferencePlan and creates per-request
+ * ExecutionContext instances.
  */
 class Engine {
    public:
     explicit Engine(const EngineConfig& config);
     ~Engine() = default;
 
-    /**
-     * @brief Build the engine
-     *
-     * @param graph
-     * @return core::Status
-     */
     core::Status build(std::shared_ptr<graph::Graph> graph);
 
-    /**
-     * @brief Execute the graph
-     *
-     * @param inputs input tensors
-     * @param outputs output tensors
-     * @return core::Status
-     */
-    core::Status forward(
-        const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs,
-        std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& outputs);
-    core::Status forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
-                         std::vector<std::shared_ptr<core::Tensor>>& outputs);
-
-    /**
-     * @brief Get input names
-     *
-     * @return std::vector<std::string>
-     */
-    std::vector<std::string> get_input_names() const;
-
-    /**
-     * @brief Get output names
-     *
-     * @return std::vector<std::string>
-     */
-    std::vector<std::string> get_output_names() const;
-
-    /**
-     * @brief Enable profiling
-     *
-     * @param enable
-     */
-    void enable_profiling(bool enable) {
-        config_.enable_profiling = enable;
+    std::shared_ptr<InferencePlan> plan() const {
+        return plan_;
     }
 
-    /**
-     * @brief Get profiling info
-     *
-     * @return std::string
-     */
+    std::shared_ptr<ExecutionContext> create_context() const;
+
+    std::vector<std::string> get_input_names() const;
+    std::vector<std::string> get_output_names() const;
     std::string get_profiling_info() const;
 
-    /**
-     * @brief Get memory plan (if memory planning was enabled)
-     */
     const MemoryPlan& get_memory_plan() const {
-        return memory_plan_;
+        return plan_->get_memory_plan();
     }
 
-    /**
-     * @brief Get optimization statistics
-     */
     const graph::GraphOptimizer::Statistics& get_optimization_stats() const {
-        return optimization_stats_;
+        return plan_->get_optimization_stats();
     }
 
    private:
-    struct InputBinding {
-        std::string name;
-        size_t node_id{0};
-        graph::Node* node{nullptr};
-    };
-
-    EngineConfig config_;                                     ///< Engine config
-    std::shared_ptr<graph::Graph> graph_;                     ///< Graph
-    std::unordered_map<core::DeviceType, std::shared_ptr<backends::DeviceContext>> contexts_;
-    std::vector<std::shared_ptr<graph::Node>> sorted_nodes_;  ///< Sorted nodes
-    MemoryPlan memory_plan_;                                  ///< Memory plan result
-    std::vector<std::shared_ptr<void>>
-        memory_pool_buffers_;  ///< Allocated memory pools (TensorRT-style)
-    graph::GraphOptimizer::Statistics optimization_stats_;          ///< Optimization statistics
-    std::unique_ptr<ShapeInferenceEngine> shape_inference_engine_;  ///< Runtime shape inference
-    std::vector<InputBinding> input_bindings_;
-
-    /**
-     * @brief Apply graph optimizations (TensorRT-style)
-     *
-     * @return core::Status
-     */
-    core::Status optimize_graph();
-
-    /**
-     * @brief Infer shapes for all tensors in the graph
-     *
-     * @return core::Status
-     */
-    core::Status infer_shapes();
-
-    /**
-     * @brief Infer shapes using optimization profile's optimal shapes
-     *
-     * @return core::Status
-     */
-    core::Status infer_shapes_with_profile();
-
-    /**
-     * @brief Update tensor metadata (shape/dtype/size) post shape inference
-     *
-     * Ensures every tensor has valid shape, dtype, and computed size_in_bytes
-     * before memory planning (TensorRT-style Step 3.5).
-     */
-    core::Status update_tensor_properties();
-
-    /**
-     * @brief Plan memory allocation (TensorRT-style)
-     *
-     * @return core::Status
-     */
-    core::Status plan_memory();
-
-    /**
-     * @brief Allocate tensors based on shapes and memory plan
-     *
-     * @return core::Status
-     */
-    core::Status allocate_tensors();
-
-    /**
-     * @brief Execute node
-     *
-     * @param node node will be executed
-     * @return core::Status
-     */
-    core::Status execute_node(std::shared_ptr<graph::Node> node);
-    std::shared_ptr<backends::DeviceContext> get_or_create_context(core::DeviceType device_type);
-
-    core::Status initialize_input_bindings();
-    core::Status gather_map_inputs(
-        const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs,
-        std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs) const;
-    core::Status build_runtime_shapes(
-        const std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs,
-        std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes) const;
-    core::Status bind_ordered_inputs(
-        const std::vector<std::shared_ptr<core::Tensor>>& ordered_inputs);
-    core::Status collect_ordered_outputs(
-        std::vector<std::shared_ptr<core::Tensor>>& ordered_outputs) const;
-
-    /**
-     * @brief Check if input shapes changed and need re-inference
-     *
-     * @param inputs Current input tensors
-     * @return True if shapes changed
-     */
-    bool check_shape_change(
-        const std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes);
-
-    /**
-     * @brief Handle runtime shape change (re-infer and reallocate)
-     *
-     * @param inputs Current input tensors
-     * @return Status
-     */
-    core::Status handle_shape_change(
-        const std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes);
-
-    // Allocation helpers (TensorRT-style static memory reuse)
-    core::Status prepare_memory_pools(bool use_memory_pools);
-    core::Status allocate_node_outputs(std::shared_ptr<graph::Node> node, bool use_memory_pools,
-                                       int& allocated_count, int& skipped_count, int& failed_count);
-    enum class PoolBindResult { kNotTried, kBound, kFailed };
-    PoolBindResult try_bind_tensor_to_pool(const std::string& tensor_name, size_t output_index,
-                                           std::shared_ptr<core::Tensor>& tensor,
-                                           bool use_memory_pools, int& allocated_count,
-                                           int& failed_count);
+    std::shared_ptr<InferencePlan> plan_;
 };
 
 }  // namespace runtime

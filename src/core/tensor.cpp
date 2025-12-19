@@ -256,6 +256,25 @@ void Tensor::bind_external_data(const std::shared_ptr<void>& data, size_t capaci
     compute_contiguous_strides();
 }
 
+bool Tensor::bind_external_data_with_offset(const std::shared_ptr<void>& data,
+                                            size_t capacity_bytes, size_t offset_bytes,
+                                            DeviceType device) {
+    const size_t required = size_in_bytes();
+    if (offset_bytes + required > capacity_bytes) {
+        return false;
+    }
+
+    if (!storage_) {
+        storage_ = std::make_shared<Storage>(data, capacity_bytes, device);
+    } else {
+        storage_->set_external(data, capacity_bytes, device);
+    }
+    storage_offset_ = offset_bytes;
+    device_ = device;
+    compute_contiguous_strides();
+    return true;
+}
+
 void Tensor::set_shape_metadata(const Shape& shape) {
     shape_ = shape;
     compute_contiguous_strides();

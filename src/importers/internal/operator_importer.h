@@ -94,6 +94,27 @@ public:
     bool has_tensor(const std::string& name) const;
 
     /**
+     * @brief Register tensor producer information
+     * @param tensor_name Output tensor name
+     * @param node_name Producer node name
+     * @param output_index Output port index on the producer
+     */
+    void register_tensor_producer(const std::string& tensor_name,
+                                  const std::string& node_name,
+                                  int output_index);
+
+    /**
+     * @brief Get tensor producer information
+     * @param tensor_name Tensor name
+     * @param node_name Output node name
+     * @param output_index Output port index
+     * @return true if producer exists
+     */
+    bool get_tensor_producer(const std::string& tensor_name,
+                             std::string& node_name,
+                             int& output_index) const;
+
+    /**
      * @brief Add node to the graph
      * @param node Shared pointer to node
      */
@@ -157,9 +178,15 @@ public:
     void set_verbose(bool verbose) { verbose_ = verbose; }
 
 private:
+    struct TensorProducer {
+        std::string node_name;
+        int output_index{0};
+    };
+
     graph::Graph* graph_; ///< Graph being built
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> tensors_; ///< Tensors registered in the context
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> weights_; ///< Weights registered in the context
+    std::unordered_map<std::string, TensorProducer> tensor_producers_; ///< Tensor producer lookup
     std::string error_message_; ///< Error message
     bool verbose_; ///< Verbose mode
 };

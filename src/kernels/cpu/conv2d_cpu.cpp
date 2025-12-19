@@ -95,7 +95,8 @@ void conv2d_cpu_kernel(KernelContext* ctx) {
 struct Conv2DCPURegister {
     Conv2DCPURegister() {
         KernelRegistry::instance().register_kernel(core::OpType::kCONVOLUTION,
-                                                   core::DeviceType::CPU, conv2d_cpu_kernel);
+                                                   core::DeviceType::CPU,
+                                                   core::DataType::FLOAT32, conv2d_cpu_kernel);
     }
 };
 

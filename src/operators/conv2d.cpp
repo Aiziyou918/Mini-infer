@@ -66,7 +66,7 @@ core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
     ctx.device_context = kernels::get_current_device_context();
 
     auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kCONVOLUTION,
-                                                           input->device());
+                                                           input->device(), input->dtype());
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

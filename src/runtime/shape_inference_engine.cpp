@@ -1,5 +1,7 @@
 #include "mini_infer/runtime/shape_inference_engine.h"
 
+#include <algorithm>
+
 #include "mini_infer/utils/logger.h"
 
 namespace mini_infer {
@@ -91,23 +93,47 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
         bool all_inputs_ready = true;
 
         // Step 1: Collect shapes from graph connections (data tensors)
-        const auto& input_nodes = node->inputs();
-        for (const auto& input_node : input_nodes) {
-            size_t input_id = input_node->id();
-            if (input_id < inferred_shapes_.size() && !inferred_shapes_[input_id].empty()) {
-                // For multi-output nodes, we currently take the first output
-                // TODO: Support explicit output index in graph connections
-                input_shapes_vec.push_back(inferred_shapes_[input_id][0]);
-            } else {
+        const auto& input_edges = node->inputs();
+        size_t graph_input_count = 0;
+        if (!input_edges.empty()) {
+            int max_dst_port = -1;
+            for (const auto& edge : input_edges) {
+                max_dst_port = std::max(max_dst_port, edge.dst_port);
+            }
+            graph_input_count = static_cast<size_t>(max_dst_port + 1);
+            input_shapes_vec.resize(graph_input_count);
+        }
+
+        for (const auto& edge : input_edges) {
+            if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
                 all_inputs_ready = false;
                 break;
+            }
+            size_t input_id = edge.node->id();
+            if (input_id >= inferred_shapes_.size() || inferred_shapes_[input_id].empty()) {
+                all_inputs_ready = false;
+                break;
+            }
+            const auto& outputs = inferred_shapes_[input_id];
+            const size_t src_index = static_cast<size_t>(edge.src_port);
+            const size_t dst_index = static_cast<size_t>(edge.dst_port);
+            if (src_index >= outputs.size() || dst_index >= input_shapes_vec.size()) {
+                all_inputs_ready = false;
+                break;
+            }
+            input_shapes_vec[dst_index] = outputs[src_index];
+        }
+        if (all_inputs_ready) {
+            for (const auto& shape : input_shapes_vec) {
+                if (shape.ndim() == 0) {
+                    all_inputs_ready = false;
+                    break;
+                }
             }
         }
 
         // Step 2: Append shapes from imported tensors (weights/bias)
         const auto& imported_tensors = node->input_tensors();
-        size_t graph_input_count = input_shapes_vec.size();
-
         for (size_t i = graph_input_count; i < imported_tensors.size(); ++i) {
             if (imported_tensors[i]) {
                 input_shapes_vec.push_back(imported_tensors[i]->shape());

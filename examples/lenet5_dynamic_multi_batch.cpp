@@ -1,7 +1,8 @@
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/runtime/optimization_profile.h"
 #include "mini_infer/utils/logger.h"
 
@@ -126,9 +127,10 @@ std::shared_ptr<core::Tensor> create_batch_tensor(const std::vector<Sample>& sam
     return tensor;
 }
 
-BatchStats run_dynamic_batch(runtime::Engine& engine, const std::string& input_name,
-                             const std::string& output_name, const std::vector<Sample>& samples,
-                             size_t batch_size, size_t offset) {
+BatchStats run_dynamic_batch(runtime::InferencePlan& plan, runtime::ExecutionContext& ctx,
+                             const std::string& input_name, const std::string& output_name,
+                             const std::vector<Sample>& samples, size_t batch_size,
+                             size_t offset) {
     BatchStats stats;
     stats.requested = batch_size;
 
@@ -138,10 +140,11 @@ BatchStats run_dynamic_batch(runtime::Engine& engine, const std::string& input_n
     }
 
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs{{input_name, batch_tensor}};
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-
     auto start = std::chrono::high_resolution_clock::now();
-    auto status = engine.forward(inputs, outputs);
+    auto status = ctx.set_inputs(inputs);
+    if (status == core::Status::SUCCESS) {
+        status = plan.execute(&ctx);
+    }
     auto end = std::chrono::high_resolution_clock::now();
     stats.time_ms =
         std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
@@ -151,6 +154,7 @@ BatchStats run_dynamic_batch(runtime::Engine& engine, const std::string& input_n
         return stats;
     }
 
+    auto outputs = ctx.named_outputs();
     auto output_it = outputs.find(output_name);
     if (output_it == outputs.end() || !output_it->second) {
         MI_LOG_ERROR("Output tensor '" + output_name + "' not found");
@@ -248,15 +252,21 @@ int main(int argc, char* argv[]) {
     config.optimization_profile = build_profile();
     config.enable_profiling = true;
 
-    runtime::Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<runtime::InferencePlan>(config);
+    auto status = plan->build(graph);
     if (status != core::Status::SUCCESS) {
-        MI_LOG_ERROR("Failed to build engine");
+        MI_LOG_ERROR("Failed to build plan");
         return 1;
     }
 
-    const auto input_names = engine.get_input_names();
-    const auto output_names = engine.get_output_names();
+    auto ctx = plan->create_execution_context();
+    if (!ctx) {
+        MI_LOG_ERROR("Failed to create execution context");
+        return 1;
+    }
+
+    const auto input_names = plan->get_input_names();
+    const auto output_names = plan->get_output_names();
     if (input_names.empty() || output_names.empty()) {
         MI_LOG_ERROR("Engine does not expose input/output names");
         return 1;
@@ -283,7 +293,8 @@ int main(int argc, char* argv[]) {
     double total_time_ms = 0.0;
 
     for (auto batch_size : batch_sizes) {
-        auto stats = run_dynamic_batch(engine, input_name, output_name, samples, batch_size, offset);
+        auto stats =
+            run_dynamic_batch(*plan, *ctx, input_name, output_name, samples, batch_size, offset);
         offset += batch_size;
         total_labeled += stats.labeled;
         total_correct += stats.correct;
@@ -306,10 +317,10 @@ int main(int argc, char* argv[]) {
     MI_LOG_INFO("Overall accuracy: " + std::to_string(accuracy * 100.0f) + "%");
     MI_LOG_INFO("Total latency: " + std::to_string(total_time_ms) + " ms");
 
-    const auto& plan = engine.get_memory_plan();
-    if (!plan.pools.empty()) {
-        MI_LOG_INFO("Memory planning pools: " + std::to_string(plan.pools.size()) +
-                    ", saving=" + std::to_string(plan.memory_saving_ratio * 100.0f) + "%");
+    const auto& memory_plan = plan->get_memory_plan();
+    if (!memory_plan.pools.empty()) {
+        MI_LOG_INFO("Memory planning pools: " + std::to_string(memory_plan.pools.size()) +
+                    ", saving=" + std::to_string(memory_plan.memory_saving_ratio * 100.0f) + "%");
     }
 
     if (accuracy_threshold > 0.0f && accuracy < accuracy_threshold) {

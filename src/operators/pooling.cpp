@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 #include "mini_infer/core/op_type.h"
-#include "mini_infer/kernels/pooling.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 namespace mini_infer {
 namespace operators {
@@ -45,12 +45,6 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // Extract dimensions
-    int N = input_shape[0];
-    int C = input_shape[1];
-    int H_in = input_shape[2];
-    int W_in = input_shape[3];
-
     // Get pre-allocated output tensor (Engine already did shape inference)
     if (outputs.empty() || !outputs[0]) {
         return core::Status::ERROR_INVALID_ARGUMENT;
@@ -63,53 +57,23 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    int H_out = static_cast<int>(output_shape[2]);
-    int W_out = static_cast<int>(output_shape[3]);
-
-    // Perform computation based on data type
     const auto dtype = input->dtype();
+    const auto op_type = (param_.type == PoolingType::MAX) ? core::OpType::kMAX_POOL
+                                                           : core::OpType::kAVERAGE_POOL;
 
-    if (dtype == core::DataType::FLOAT32) {
-        const float* input_data = static_cast<const float*>(input->data());
-        float* output_data = static_cast<float*>(output->data());
+    kernels::KernelContext ctx;
+    ctx.inputs = &inputs;
+    ctx.outputs = &outputs;
+    ctx.op_param = &param_;
+    ctx.device_context = kernels::get_current_device_context();
 
-        // Dispatch to appropriate pooling kernel
-        if (param_.type == PoolingType::MAX) {
-            kernels::PoolingKernel::maxpool2d<float>(input_data, output_data, N, C, H_in, W_in,
-                                                     H_out, W_out, param_.kernel_h, param_.kernel_w,
-                                                     param_.stride_h, param_.stride_w,
-                                                     param_.padding_h, param_.padding_w);
-        } else if (param_.type == PoolingType::AVERAGE) {
-            kernels::PoolingKernel::avgpool2d<float>(input_data, output_data, N, C, H_in, W_in,
-                                                     H_out, W_out, param_.kernel_h, param_.kernel_w,
-                                                     param_.stride_h, param_.stride_w,
-                                                     param_.padding_h, param_.padding_w);
-        } else {
-            return core::Status::ERROR_INVALID_ARGUMENT;
-        }
-
-    } else if (dtype == core::DataType::INT32) {
-        const int32_t* input_data = static_cast<const int32_t*>(input->data());
-        int32_t* output_data = static_cast<int32_t*>(output->data());
-
-        // Dispatch to appropriate pooling kernel
-        if (param_.type == PoolingType::MAX) {
-            kernels::PoolingKernel::maxpool2d<int32_t>(
-                input_data, output_data, N, C, H_in, W_in, H_out, W_out, param_.kernel_h,
-                param_.kernel_w, param_.stride_h, param_.stride_w, param_.padding_h,
-                param_.padding_w);
-        } else if (param_.type == PoolingType::AVERAGE) {
-            kernels::PoolingKernel::avgpool2d<int32_t>(
-                input_data, output_data, N, C, H_in, W_in, H_out, W_out, param_.kernel_h,
-                param_.kernel_w, param_.stride_h, param_.stride_w, param_.padding_h,
-                param_.padding_w);
-        } else {
-            return core::Status::ERROR_INVALID_ARGUMENT;
-        }
-
-    } else {
-        return core::Status::ERROR_INVALID_ARGUMENT;
+    auto kernel =
+        kernels::KernelRegistry::instance().find(op_type, input->device(), dtype);
+    if (!kernel) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
     }
+
+    kernel(&ctx);
 
     return core::Status::SUCCESS;
 }

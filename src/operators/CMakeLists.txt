@@ -7,6 +7,7 @@ set(OPERATORS_SOURCES
     pooling.cpp
     flatten.cpp
     reshape.cpp
+    softmax.cpp
 )
 
 add_library(mini_infer_operators ${OPERATORS_SOURCES})

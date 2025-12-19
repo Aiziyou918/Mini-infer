@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mini_infer/importers/operator_importer.h"
+#include "importers/internal/operator_importer.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/core/types.h"
 

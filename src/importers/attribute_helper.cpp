@@ -1,6 +1,6 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
-#include "mini_infer/importers/attribute_helper.h"
+#include "importers/internal/attribute_helper.h"
 #include "onnx.pb.h"
 
 namespace mini_infer {

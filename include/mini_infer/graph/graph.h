@@ -50,14 +50,14 @@ public:
     void remove_node(const std::string& name);
 
     /**
-     * @brief Connect two nodes by name: src -> dst.
+     * @brief Connect two nodes by name: src(src_port) -> dst(dst_port).
      * This will:
      *  - validate both nodes exist
      *  - reject self-loop (src == dst)
      *  - avoid duplicate edges (idempotent)
      */
-    [[nodiscard]] core::Status connect(const std::string& src_name,
-                                       const std::string& dst_name);
+    [[nodiscard]] core::Status connect(const std::string& src_name, const std::string& dst_name,
+                                       int src_port = 0, int dst_port = 0);
 
     /**
      * @brief Set the graph input node names.

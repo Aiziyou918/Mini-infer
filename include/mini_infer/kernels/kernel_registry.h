@@ -46,12 +46,14 @@ public:
         return registry;
     }
 
-    void register_kernel(core::OpType op_type, core::DeviceType device_type, KernelFunc func) {
-        registry_[Key{op_type, device_type}] = std::move(func);
+    void register_kernel(core::OpType op_type, core::DeviceType device_type, core::DataType dtype,
+                         KernelFunc func) {
+        registry_[Key{op_type, device_type, dtype}] = std::move(func);
     }
 
-    KernelFunc find(core::OpType op_type, core::DeviceType device_type) const {
-        auto it = registry_.find(Key{op_type, device_type});
+    KernelFunc find(core::OpType op_type, core::DeviceType device_type,
+                    core::DataType dtype) const {
+        auto it = registry_.find(Key{op_type, device_type, dtype});
         if (it == registry_.end()) {
             return nullptr;
         }
@@ -62,9 +64,11 @@ private:
     struct Key {
         core::OpType op_type;
         core::DeviceType device_type;
+        core::DataType dtype;
 
         bool operator==(const Key& other) const {
-            return op_type == other.op_type && device_type == other.device_type;
+            return op_type == other.op_type && device_type == other.device_type &&
+                   dtype == other.dtype;
         }
     };
 
@@ -72,7 +76,11 @@ private:
         size_t operator()(const Key& key) const {
             const auto op_hash = std::hash<int>{}(static_cast<int>(key.op_type));
             const auto dev_hash = std::hash<int>{}(static_cast<int>(key.device_type));
-            return op_hash ^ (dev_hash + 0x9e3779b9 + (op_hash << 6) + (op_hash >> 2));
+            const auto dtype_hash = std::hash<int>{}(static_cast<int>(key.dtype));
+            size_t seed = op_hash;
+            seed ^= dev_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= dtype_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            return seed;
         }
     };
 

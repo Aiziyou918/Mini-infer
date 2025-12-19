@@ -1,31 +1,12 @@
 #pragma once
 
 #include "mini_infer/graph/graph.h"
-#include "mini_infer/core/tensor.h"
-#include "mini_infer/core/types.h"
-
 #include <string>
 #include <memory>
-#include <functional>
-#include <unordered_map>
-
-// Forward declarations for ONNX protobuf types
-namespace onnx {
-    class ModelProto;
-    class GraphProto;
-    class NodeProto;
-    class TensorProto;
-    class AttributeProto;
-    class ValueInfoProto;
-}
+ 
 
 namespace mini_infer {
 namespace importers {
-
-// Forward declarations
-class ModelImporter;
-class OperatorImporter;
-class OperatorRegistry;
 
 /**
  * @brief ONNX Parser - Main interface for importing ONNX models
@@ -86,17 +67,11 @@ public:
      */
     bool is_verbose() const { return verbose_; }
 
-    /**
-     * @brief Get operator registry for custom operators
-     * @return Reference to operator registry
-     */
-    OperatorRegistry& get_registry();
-
 private:
-    std::unique_ptr<ModelImporter> model_importer_;
-    std::unique_ptr<OperatorRegistry> operator_registry_;
     std::string error_message_;
     bool verbose_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 
     void set_error(const std::string& message);
     void log_info(const std::string& message);

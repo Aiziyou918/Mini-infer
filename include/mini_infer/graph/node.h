@@ -20,6 +20,12 @@ namespace graph {
  */
 class Node {
    public:
+    struct Edge {
+        std::shared_ptr<Node> node;
+        int src_port{0};
+        int dst_port{0};
+    };
+
     explicit Node(const std::string& name);
     ~Node() = default;
 
@@ -43,34 +49,34 @@ class Node {
      * @brief Add an input node
      * @param input_node The input node to add
      */
-    void add_input(std::shared_ptr<Node> input_node);
+    void add_input(const std::shared_ptr<Node>& input_node, int src_port = 0, int dst_port = 0);
 
     /**
      * @brief Add an output node
      * @param output_node The output node to add
      */
-    void add_output(std::shared_ptr<Node> output_node);
+    void add_output(const std::shared_ptr<Node>& output_node, int src_port = 0, int dst_port = 0);
 
     /**
      * @brief Get the input nodes
      * @return The input nodes
      */
-    const std::vector<std::shared_ptr<Node>>& inputs() const {
-        return input_nodes_;
+    const std::vector<Edge>& inputs() const {
+        return input_edges_;
     }
-    std::vector<std::shared_ptr<Node>>& mutable_inputs() {
-        return input_nodes_;
+    std::vector<Edge>& mutable_inputs() {
+        return input_edges_;
     }
 
     /**
      * @brief Get the output nodes
      * @return The output nodes
      */
-    const std::vector<std::shared_ptr<Node>>& outputs() const {
-        return output_nodes_;
+    const std::vector<Edge>& outputs() const {
+        return output_edges_;
     }
-    std::vector<std::shared_ptr<Node>>& mutable_outputs() {
-        return output_nodes_;
+    std::vector<Edge>& mutable_outputs() {
+        return output_edges_;
     }
 
     /**
@@ -163,8 +169,8 @@ class Node {
     core::OpType cached_op_type_;              ///< Cached operator type for fast access
     size_t node_id_{0};                        ///< Unique node ID for fast indexing
 
-    std::vector<std::shared_ptr<Node>> input_nodes_;   ///< The input nodes of the node
-    std::vector<std::shared_ptr<Node>> output_nodes_;  ///< The output nodes of the node
+    std::vector<Edge> input_edges_;   ///< Incoming edges
+    std::vector<Edge> output_edges_;  ///< Outgoing edges
 
     std::vector<std::shared_ptr<core::Tensor>> input_tensors_;   ///< The input tensors of the node
     std::vector<std::shared_ptr<core::Tensor>> output_tensors_;  ///< The output tensors of the node

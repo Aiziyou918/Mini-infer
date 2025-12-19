@@ -150,10 +150,10 @@ void LivenessAnalyzer::compute_producers_consumers(
         producers[node_name] = node_name;
 
         // 该节点消费其输入节点的输出
-        for (const auto& input_node : node->inputs()) {
-            if (!input_node)
+        for (const auto& edge : node->inputs()) {
+            if (!edge.node)
                 continue;
-            consumers[input_node->name()].push_back(node_name);
+            consumers[edge.node->name()].push_back(node_name);
         }
     }
 }
@@ -211,7 +211,7 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
                 std::to_string(interference_graph.nodes().size()) + " nodes");
 
     // Step 3: 贪心着色算法分配内存池
-    plan = greedy_coloring(interference_graph, lifetimes);
+    plan = allocate_offsets(lifetimes);
     // 恢复原始内存统计，避免被新 plan 覆盖
     plan.original_memory = original_memory;
 
@@ -337,6 +337,123 @@ size_t MemoryPlanner::align_size(size_t size) const {
         return size;
     }
     return ((size + alignment_ - 1) / alignment_) * alignment_;
+}
+
+size_t MemoryPlanner::align_offset(size_t offset) const {
+    if (alignment_ == 0) {
+        return offset;
+    }
+    return ((offset + alignment_ - 1) / alignment_) * alignment_;
+}
+
+MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetimes) {
+    MemoryPlan plan;
+
+    struct LiveAlloc {
+        std::string name;
+        int death_time;
+        size_t offset;
+        size_t size;
+    };
+
+    struct FreeBlock {
+        size_t offset;
+        size_t size;
+    };
+
+    std::vector<TensorLifetime*> sorted_lifetimes;
+    for (auto& lt : lifetimes) {
+        if (!lt.is_persistent) {
+            sorted_lifetimes.push_back(&lt);
+        }
+    }
+
+    std::sort(sorted_lifetimes.begin(), sorted_lifetimes.end(),
+              [](const TensorLifetime* a, const TensorLifetime* b) {
+                  if (a->birth_time == b->birth_time) {
+                      return a->size_bytes > b->size_bytes;
+                  }
+                  return a->birth_time < b->birth_time;
+              });
+
+    std::vector<LiveAlloc> active;
+    std::vector<FreeBlock> free_blocks;
+    size_t buffer_size = 0;
+
+    auto collect_free_block = [&](size_t offset, size_t size) {
+        if (size == 0) {
+            return;
+        }
+        free_blocks.push_back(FreeBlock{offset, size});
+        std::sort(free_blocks.begin(), free_blocks.end(),
+                  [](const FreeBlock& a, const FreeBlock& b) { return a.offset < b.offset; });
+        std::vector<FreeBlock> merged;
+        for (const auto& block : free_blocks) {
+            if (merged.empty() ||
+                merged.back().offset + merged.back().size < block.offset) {
+                merged.push_back(block);
+            } else {
+                merged.back().size =
+                    std::max(merged.back().offset + merged.back().size,
+                             block.offset + block.size) -
+                    merged.back().offset;
+            }
+        }
+        free_blocks.swap(merged);
+    };
+
+    for (auto* tensor : sorted_lifetimes) {
+        const size_t aligned_size = align_size(tensor->size_bytes);
+
+        // Expire allocations whose lifetime ended before this tensor starts.
+        auto it = active.begin();
+        while (it != active.end()) {
+            if (it->death_time < tensor->birth_time) {
+                collect_free_block(it->offset, it->size);
+                it = active.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        size_t offset = 0;
+        bool found = false;
+        for (auto block_it = free_blocks.begin(); block_it != free_blocks.end(); ++block_it) {
+            if (block_it->size >= aligned_size) {
+                offset = block_it->offset;
+                if (block_it->size == aligned_size) {
+                    free_blocks.erase(block_it);
+                } else {
+                    block_it->offset += aligned_size;
+                    block_it->size -= aligned_size;
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            offset = align_offset(buffer_size);
+            buffer_size = offset + aligned_size;
+        }
+
+        plan.tensor_offsets[tensor->name] = offset;
+        plan.tensor_to_pool[tensor->name] = 0;
+        tensor->pool_id = 0;
+
+        active.push_back(LiveAlloc{tensor->name, tensor->death_time, offset, aligned_size});
+    }
+
+    plan.shared_buffer_size = align_size(buffer_size);
+    if (plan.shared_buffer_size > 0) {
+        plan.pools.clear();
+        plan.pools.push_back(MemoryPool(0, plan.shared_buffer_size));
+        for (const auto& [name, _] : plan.tensor_offsets) {
+            plan.pools[0].tensors.push_back(name);
+        }
+    }
+
+    return plan;
 }
 
 void MemoryPlanner::print_plan(const MemoryPlan& plan) const {

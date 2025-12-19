@@ -1,8 +1,7 @@
 #include "mini_infer/operators/flatten.h"
 
-#include <cstring>
-
 #include "mini_infer/core/op_type.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 namespace mini_infer {
 namespace operators {
@@ -27,12 +26,18 @@ core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     }
     auto output = outputs[0];
 
-    // Flatten is a view operation - just copy data if not sharing memory
-    // In static graph mode, Engine may allocate separate buffers
-    if (input->data() != output->data()) {
-        // Need to copy data
-        std::memcpy(output->data(), input->data(), input->size_in_bytes());
+    kernels::KernelContext ctx;
+    ctx.inputs = &inputs;
+    ctx.outputs = &outputs;
+    ctx.device_context = kernels::get_current_device_context();
+
+    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kFLATTEN,
+                                                           input->device(), input->dtype());
+    if (!kernel) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
     }
+
+    kernel(&ctx);
 
     return core::Status::SUCCESS;
 }

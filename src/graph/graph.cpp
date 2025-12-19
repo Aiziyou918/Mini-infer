@@ -56,22 +56,28 @@ void Graph::remove_node(const std::string& name) {
         }
         // 清理 outputs 中的 target
         auto& outs = node->mutable_outputs();
-        outs.erase(
-            std::remove_if(outs.begin(), outs.end(),
-                           [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
-            outs.end());
+        outs.erase(std::remove_if(outs.begin(), outs.end(),
+                                  [&](const Node::Edge& e) {
+                                      return e.node && e.node->name() == name;
+                                  }),
+                   outs.end());
         // 清理 inputs 中的 target
         auto& ins = node->mutable_inputs();
-        ins.erase(
-            std::remove_if(ins.begin(), ins.end(),
-                           [&](const std::shared_ptr<Node>& n) { return n && n->name() == name; }),
-            ins.end());
+        ins.erase(std::remove_if(ins.begin(), ins.end(),
+                                 [&](const Node::Edge& e) {
+                                     return e.node && e.node->name() == name;
+                                 }),
+                  ins.end());
     }
     nodes_.erase(it);
 }
 
-core::Status Graph::connect(const std::string& src_name, const std::string& dst_name) {
+core::Status Graph::connect(const std::string& src_name, const std::string& dst_name, int src_port,
+                            int dst_port) {
     if (src_name.empty() || dst_name.empty()) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    if (src_port < 0 || dst_port < 0) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
@@ -89,13 +95,14 @@ core::Status Graph::connect(const std::string& src_name, const std::string& dst_
 
     // Avoid duplicate edges (idempotent)
     for (const auto& out : src->outputs()) {
-        if (out && out->name() == dst_name) {
+        if (out.node && out.node->name() == dst_name && out.src_port == src_port &&
+            out.dst_port == dst_port) {
             return core::Status::SUCCESS;
         }
     }
 
-    src->add_output(dst);
-    dst->add_input(src);
+    src->add_output(dst, src_port, dst_port);
+    dst->add_input(src, src_port, dst_port);
 
     return core::Status::SUCCESS;
 }
@@ -148,10 +155,10 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
             continue;
 
         for (const auto& out : node->outputs()) {
-            if (!out) {
+            if (!out.node) {
                 continue;
             }
-            auto it = in_degree.find(out->name());
+            auto it = in_degree.find(out.node->name());
             if (it != in_degree.end()) {
                 ++(it->second);
             }
@@ -186,16 +193,16 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
         sorted_nodes.push_back(node);
 
         for (const auto& out : node->outputs()) {
-            if (!out)
+            if (!out.node)
                 continue;
-            auto it = in_degree.find(out->name());
+            auto it = in_degree.find(out.node->name());
             if (it == in_degree.end()) {
                 continue;  // Nodes not in nodes_ are ignored; handled by validate()
             }
 
             --(it->second);
             if (it->second == 0) {
-                q.push(out);
+                q.push(out.node);
             }
         }
     }

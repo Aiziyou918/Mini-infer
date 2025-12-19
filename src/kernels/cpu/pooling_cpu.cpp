@@ -1,4 +1,6 @@
 #include "mini_infer/kernels/pooling.h"
+#include "mini_infer/kernels/kernel_registry.h"
+#include "mini_infer/operators/pooling.h"
 #include <algorithm>
 #include <limits>
 #include <cmath>
@@ -130,6 +132,74 @@ void avgpool2d_impl(
 
 } // namespace cpu
 
+namespace {
+
+template <typename T>
+void maxpool_dispatch(KernelContext* ctx) {
+    if (!ctx || !ctx->inputs || !ctx->outputs) {
+        return;
+    }
+    const auto& inputs = *ctx->inputs;
+    auto& outputs = *ctx->outputs;
+    if (inputs.empty() || outputs.empty() || !inputs[0] || !outputs[0]) {
+        return;
+    }
+    const auto* param = ctx->param<operators::PoolingParam>();
+    if (!param) {
+        return;
+    }
+
+    const auto& input_shape = inputs[0]->shape();
+    const auto& output_shape = outputs[0]->shape();
+    if (input_shape.ndim() != 4 || output_shape.ndim() != 4) {
+        return;
+    }
+
+    const T* input_data = static_cast<const T*>(inputs[0]->data());
+    T* output_data = static_cast<T*>(outputs[0]->data());
+
+    PoolingKernel::maxpool2d<T>(input_data, output_data, static_cast<int>(input_shape[0]),
+                                static_cast<int>(input_shape[1]), static_cast<int>(input_shape[2]),
+                                static_cast<int>(input_shape[3]), static_cast<int>(output_shape[2]),
+                                static_cast<int>(output_shape[3]), param->kernel_h, param->kernel_w,
+                                param->stride_h, param->stride_w, param->padding_h,
+                                param->padding_w);
+}
+
+template <typename T>
+void avgpool_dispatch(KernelContext* ctx) {
+    if (!ctx || !ctx->inputs || !ctx->outputs) {
+        return;
+    }
+    const auto& inputs = *ctx->inputs;
+    auto& outputs = *ctx->outputs;
+    if (inputs.empty() || outputs.empty() || !inputs[0] || !outputs[0]) {
+        return;
+    }
+    const auto* param = ctx->param<operators::PoolingParam>();
+    if (!param) {
+        return;
+    }
+
+    const auto& input_shape = inputs[0]->shape();
+    const auto& output_shape = outputs[0]->shape();
+    if (input_shape.ndim() != 4 || output_shape.ndim() != 4) {
+        return;
+    }
+
+    const T* input_data = static_cast<const T*>(inputs[0]->data());
+    T* output_data = static_cast<T*>(outputs[0]->data());
+
+    PoolingKernel::avgpool2d<T>(input_data, output_data, static_cast<int>(input_shape[0]),
+                                static_cast<int>(input_shape[1]), static_cast<int>(input_shape[2]),
+                                static_cast<int>(input_shape[3]), static_cast<int>(output_shape[2]),
+                                static_cast<int>(output_shape[3]), param->kernel_h, param->kernel_w,
+                                param->stride_h, param->stride_w, param->padding_h,
+                                param->padding_w);
+}
+
+}  // namespace
+
 // ============================================================================
 // Explicit Registration Function 
 // ============================================================================
@@ -170,6 +240,30 @@ struct PoolingKernelsAutoRegister {
     PoolingKernelsAutoRegister() { register_pooling_kernels(); }
 };
 static PoolingKernelsAutoRegister g_pooling_kernels_auto_register;
+}  // namespace
+
+namespace {
+struct PoolingKernelRegistryRegister {
+    PoolingKernelRegistryRegister() {
+        KernelRegistry::instance().register_kernel(core::OpType::kMAX_POOL,
+                                                   core::DeviceType::CPU,
+                                                   core::DataType::FLOAT32,
+                                                   maxpool_dispatch<float>);
+        KernelRegistry::instance().register_kernel(core::OpType::kMAX_POOL,
+                                                   core::DeviceType::CPU,
+                                                   core::DataType::INT32,
+                                                   maxpool_dispatch<int32_t>);
+        KernelRegistry::instance().register_kernel(core::OpType::kAVERAGE_POOL,
+                                                   core::DeviceType::CPU,
+                                                   core::DataType::FLOAT32,
+                                                   avgpool_dispatch<float>);
+        KernelRegistry::instance().register_kernel(core::OpType::kAVERAGE_POOL,
+                                                   core::DeviceType::CPU,
+                                                   core::DataType::INT32,
+                                                   avgpool_dispatch<int32_t>);
+    }
+};
+static PoolingKernelRegistryRegister g_pooling_kernel_registry_register;
 }  // namespace
 
 } // namespace kernels

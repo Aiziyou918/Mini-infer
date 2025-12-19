@@ -1,5 +1,5 @@
 #include "mini_infer/graph/graph.h"
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/utils/logger.h"
 #include <iostream>
 
@@ -53,13 +53,18 @@ int main() {
         std::cout << "done" << std::endl;
     }
     
-    // 创建引擎
-    MI_LOG_INFO("Creating inference engine...");
+    // 创建推理计划
+    MI_LOG_INFO("Creating inference plan...");
     runtime::EngineConfig config;
     config.device_type = core::DeviceType::CPU;
     config.enable_profiling = true;
-    
-    runtime::Engine engine(config);
+
+    auto plan = std::make_shared<runtime::InferencePlan>(config);
+    status = plan->build(graph);
+    if (status != core::Status::SUCCESS) {
+        std::cout << "[FAILED] Plan build failed" << std::endl;
+        return 1;
+    }
     
     MI_LOG_INFO("Build graph example completed successfully!");
     

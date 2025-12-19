@@ -1,7 +1,7 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
-#include "mini_infer/importers/operator_importer.h"
-#include "mini_infer/importers/builtin_operators.h"
+#include "importers/internal/operator_importer.h"
+#include "importers/internal/builtin_operators.h"
 #include "mini_infer/utils/logger.h"
 
 namespace mini_infer {
@@ -30,6 +30,24 @@ std::shared_ptr<core::Tensor> ImporterContext::get_tensor(const std::string& nam
 
 bool ImporterContext::has_tensor(const std::string& name) const {
     return tensors_.find(name) != tensors_.end();
+}
+
+void ImporterContext::register_tensor_producer(const std::string& tensor_name,
+                                               const std::string& node_name,
+                                               int output_index) {
+    tensor_producers_[tensor_name] = TensorProducer{node_name, output_index};
+}
+
+bool ImporterContext::get_tensor_producer(const std::string& tensor_name,
+                                          std::string& node_name,
+                                          int& output_index) const {
+    auto it = tensor_producers_.find(tensor_name);
+    if (it == tensor_producers_.end()) {
+        return false;
+    }
+    node_name = it->second.node_name;
+    output_index = it->second.output_index;
+    return true;
 }
 
 void ImporterContext::add_node(std::shared_ptr<graph::Node> node) {

@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 #include <unordered_map>
 #include <vector>
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/runtime/optimization_profile.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/operators/conv2d.h"
@@ -72,8 +73,8 @@ TEST_F(DynamicShapeRuntimeTest, BuildWithOptimalShape) {
     config.optimization_profile = profile;
     config.enable_profiling = true;
     
-    Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    auto status = plan->build(graph);
     
     EXPECT_EQ(status, core::Status::SUCCESS);
     
@@ -91,8 +92,9 @@ TEST_F(DynamicShapeRuntimeTest, ForwardWithDifferentBatchSizes) {
     config.enable_dynamic_shapes = true;
     config.optimization_profile = profile;
     
-    Engine engine(config);
-    engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    plan->build(graph);
+    auto ctx = plan->create_execution_context();
     
     // First forward with batch=1
     auto input1 = std::make_shared<core::Tensor>(
@@ -103,8 +105,9 @@ TEST_F(DynamicShapeRuntimeTest, ForwardWithDifferentBatchSizes) {
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs1;
     inputs1["input"] = input1;
     
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs1;
-    auto status = engine.forward(inputs1, outputs1);
+    auto status = ctx->set_inputs(inputs1);
+    ASSERT_EQ(status, core::Status::SUCCESS);
+    status = plan->execute(ctx.get());
     EXPECT_EQ(status, core::Status::SUCCESS);
     
     // Second forward with batch=2 (shape change)
@@ -116,8 +119,9 @@ TEST_F(DynamicShapeRuntimeTest, ForwardWithDifferentBatchSizes) {
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs2;
     inputs2["input"] = input2;
     
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs2;
-    status = engine.forward(inputs2, outputs2);
+    status = ctx->set_inputs(inputs2);
+    ASSERT_EQ(status, core::Status::SUCCESS);
+    status = plan->execute(ctx.get());
     EXPECT_EQ(status, core::Status::SUCCESS);
 }
 
@@ -126,8 +130,9 @@ TEST_F(DynamicShapeRuntimeTest, ShapeOutOfRange) {
     config.enable_dynamic_shapes = true;
     config.optimization_profile = profile;
     
-    Engine engine(config);
-    engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    plan->build(graph);
+    auto ctx = plan->create_execution_context();
     
     // Try input with shape outside profile range
     auto input_too_large = std::make_shared<core::Tensor>(
@@ -138,8 +143,9 @@ TEST_F(DynamicShapeRuntimeTest, ShapeOutOfRange) {
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs;
     inputs["input"] = input_too_large;
     
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-    auto status = engine.forward(inputs, outputs);
+    auto status = ctx->set_inputs(inputs);
+    ASSERT_EQ(status, core::Status::SUCCESS);
+    status = plan->execute(ctx.get());
     
     // Should fail validation
     EXPECT_NE(status, core::Status::SUCCESS);
@@ -151,8 +157,9 @@ TEST_F(DynamicShapeRuntimeTest, MultipleShapeChanges) {
     config.optimization_profile = profile;
     config.enable_profiling = true;
     
-    Engine engine(config);
-    engine.build(graph);
+    auto plan = std::make_shared<InferencePlan>(config);
+    plan->build(graph);
+    auto ctx = plan->create_execution_context();
     
     // Test multiple different shapes
     std::vector<core::Shape> test_shapes = {
@@ -169,8 +176,9 @@ TEST_F(DynamicShapeRuntimeTest, MultipleShapeChanges) {
         std::unordered_map<std::string, std::shared_ptr<core::Tensor>> inputs;
         inputs["input"] = input;
         
-        std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-        auto status = engine.forward(inputs, outputs);
+        auto status = ctx->set_inputs(inputs);
+        ASSERT_EQ(status, core::Status::SUCCESS);
+        status = plan->execute(ctx.get());
         
         EXPECT_EQ(status, core::Status::SUCCESS) 
             << "Failed with shape: " << shape.to_string();
@@ -181,4 +189,3 @@ int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-

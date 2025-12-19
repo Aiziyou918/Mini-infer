@@ -20,7 +20,8 @@
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/utils/logger.h"
 
 namespace fs = std::filesystem;
@@ -105,7 +106,8 @@ std::vector<float> softmax(const std::vector<float>& logits) {
 /**
  * @brief Run optimized inference with memory planning
  */
-InferenceResult run_inference(mini_infer::runtime::Engine& engine,
+InferenceResult run_inference(mini_infer::runtime::InferencePlan& plan,
+                              mini_infer::runtime::ExecutionContext& ctx,
                               const std::vector<float>& input_data, int actual_label,
                               const std::string& input_name, const std::string& output_name) {
     InferenceResult result;
@@ -128,8 +130,10 @@ InferenceResult run_inference(mini_infer::runtime::Engine& engine,
     inputs[input_name] = input_tensor;
 
     // Execute inference
-    std::unordered_map<std::string, std::shared_ptr<mini_infer::core::Tensor>> outputs;
-    auto status = engine.forward(inputs, outputs);
+    auto status = ctx.set_inputs(inputs);
+    if (status == mini_infer::core::Status::SUCCESS) {
+        status = plan.execute(&ctx);
+    }
 
     if (status != mini_infer::core::Status::SUCCESS) {
         MI_LOG_ERROR("Inference failed");
@@ -137,7 +141,9 @@ InferenceResult run_inference(mini_infer::runtime::Engine& engine,
     }
 
     // Get output tensor
-    auto output_tensor = outputs[output_name];
+    auto outputs = ctx.named_outputs();
+    auto it = outputs.find(output_name);
+    auto output_tensor = it != outputs.end() ? it->second : nullptr;
     if (!output_tensor) {
         MI_LOG_ERROR("Output tensor not found: " + output_name);
         return result;
@@ -184,8 +190,8 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     MI_LOG_INFO("Model loaded successfully");
     MI_LOG_INFO("");
 
-    // Step 2: Build engine (TensorRT-style: includes optimization and memory planning)
-    MI_LOG_INFO("[Step 2] Building inference engine...");
+    // Step 2: Build inference plan (TensorRT-style: includes optimization and memory planning)
+    MI_LOG_INFO("[Step 2] Building inference plan...");
     mini_infer::runtime::EngineConfig config;
     config.device_type = mini_infer::core::DeviceType::CPU;
     config.enable_graph_optimization = true;
@@ -193,16 +199,21 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     config.memory_alignment = 256;
     config.enable_profiling = true;  // Enable verbose logging
 
-    mini_infer::runtime::Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<mini_infer::runtime::InferencePlan>(config);
+    auto status = plan->build(graph);
     if (status != mini_infer::core::Status::SUCCESS) {
-        MI_LOG_ERROR("Failed to build engine");
+        MI_LOG_ERROR("Failed to build plan");
+        return;
+    }
+    auto ctx = plan->create_execution_context();
+    if (!ctx) {
+        MI_LOG_ERROR("Failed to create execution context");
         return;
     }
     MI_LOG_INFO("");
 
     // Get statistics from engine
-    const auto& memory_plan = engine.get_memory_plan();
+    const auto& memory_plan = plan->get_memory_plan();
     
     MemoryStats mem_stats = {0, 0, 0.0f, 0};
     if (enable_memory_planning) {
@@ -213,8 +224,8 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
     }
 
     // Step 3: Get input/output names
-    auto input_names = engine.get_input_names();
-    auto output_names = engine.get_output_names();
+    auto input_names = plan->get_input_names();
+    auto output_names = plan->get_output_names();
 
     if (input_names.empty() || output_names.empty()) {
         MI_LOG_ERROR("Failed to get input/output names from engine");
@@ -257,7 +268,7 @@ void test_optimized_inference(const std::string& model_path, const std::string& 
         std::string filename = fs::path(sample_file).filename().string();
         int actual_label = extract_label_from_filename(filename);
 
-        auto result = run_inference(engine, input_data, actual_label, input_name, output_name);
+        auto result = run_inference(*plan, *ctx, input_data, actual_label, input_name, output_name);
         result.filename = filename;
         results.push_back(result);
 

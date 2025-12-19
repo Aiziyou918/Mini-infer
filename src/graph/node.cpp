@@ -23,15 +23,15 @@ const char* Node::type_name() const {
     return "Unknown";
 }
 
-void Node::add_input(std::shared_ptr<Node> input_node) {
+void Node::add_input(const std::shared_ptr<Node>& input_node, int src_port, int dst_port) {
     if (input_node) {
-        input_nodes_.push_back(input_node);
+        input_edges_.push_back(Edge{input_node, src_port, dst_port});
     }
 }
 
-void Node::add_output(std::shared_ptr<Node> output_node) {
+void Node::add_output(const std::shared_ptr<Node>& output_node, int src_port, int dst_port) {
     if (output_node) {
-        output_nodes_.push_back(output_node);
+        output_edges_.push_back(Edge{output_node, src_port, dst_port});
     }
 }
 

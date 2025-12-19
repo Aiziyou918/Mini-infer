@@ -67,7 +67,7 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
         return false;
     }
 
-    auto activation_node = conv_node->outputs()[0];
+    auto activation_node = conv_node->outputs()[0].node;
     if (!activation_node || !activation_node->get_operator()) {
         return false;
     }
@@ -98,22 +98,26 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
     // Reconnect graph: Conv -> Activation's consumers
     auto& conv_outputs = conv_node->mutable_outputs();
     conv_outputs.erase(std::remove_if(conv_outputs.begin(), conv_outputs.end(),
-                                      [&](const std::shared_ptr<Node>& n) {
-                                          return n && n->name() == activation_node->name();
+                                      [&](const Node::Edge& e) {
+                                          return e.node &&
+                                                 e.node->name() == activation_node->name();
                                       }),
                        conv_outputs.end());
 
-    for (const auto& consumer : activation_node->outputs()) {
-        if (!consumer) continue;
+    for (const auto& edge : activation_node->outputs()) {
+        if (!edge.node)
+            continue;
 
-        auto& consumer_inputs = consumer->mutable_inputs();
+        auto& consumer_inputs = edge.node->mutable_inputs();
         consumer_inputs.erase(std::remove_if(consumer_inputs.begin(), consumer_inputs.end(),
-                                             [&](const std::shared_ptr<Node>& n) {
-                                                 return n && n->name() == activation_node->name();
+                                             [&](const Node::Edge& e) {
+                                                 return e.node &&
+                                                        e.node->name() ==
+                                                            activation_node->name();
                                              }),
                               consumer_inputs.end());
 
-        (void)graph->connect(conv_node->name(), consumer->name());
+        (void)graph->connect(conv_node->name(), edge.node->name(), edge.src_port, edge.dst_port);
     }
 
     // Mark for deletion (deferred)

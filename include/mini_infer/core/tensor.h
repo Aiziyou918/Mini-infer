@@ -196,6 +196,9 @@ class Tensor {
      */
     void bind_external_data(const std::shared_ptr<void>& data, size_t capacity_bytes,
                             DeviceType device = DeviceType::CPU);
+    bool bind_external_data_with_offset(const std::shared_ptr<void>& data, size_t capacity_bytes,
+                                        size_t offset_bytes,
+                                        DeviceType device = DeviceType::CPU);
 
     void set_shape_metadata(const Shape& shape);
 

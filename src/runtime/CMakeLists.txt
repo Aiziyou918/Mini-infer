@@ -1,6 +1,8 @@
 # Runtime module
 set(RUNTIME_SOURCES
     engine.cpp
+    execution_context.cpp
+    inference_plan.cpp
     memory_planner.cpp
     optimization_profile.cpp
     shape_inference_engine.cpp

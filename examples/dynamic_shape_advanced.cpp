@@ -1,4 +1,5 @@
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/runtime/optimization_profile.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/operators/conv2d.h"
@@ -10,11 +11,8 @@
 
 using namespace mini_infer;
 
-void run_inference(
-    runtime::Engine& engine,
-    const std::string& test_name,
-    const core::Shape& input_shape
-) {
+void run_inference(runtime::InferencePlan& plan, runtime::ExecutionContext& ctx,
+                   const std::string& test_name, const core::Shape& input_shape) {
     MI_LOG_INFO("");
     MI_LOG_INFO("----------------------------------------");
     MI_LOG_INFO("Test: " + test_name);
@@ -37,10 +35,11 @@ void run_inference(
     inputs["input"] = input;
     
     // Run forward
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-    
     auto start = std::chrono::high_resolution_clock::now();
-    auto status = engine.forward(inputs, outputs);
+    auto status = ctx.set_inputs(inputs);
+    if (status == core::Status::SUCCESS) {
+        status = plan.execute(&ctx);
+    }
     auto end = std::chrono::high_resolution_clock::now();
     
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -50,8 +49,10 @@ void run_inference(
                    std::to_string(duration.count() / 1000.0) + " ms");
         
         // Show output shape
-        if (outputs.find("pool1") != outputs.end()) {
-            auto output_shape = outputs["pool1"]->shape();
+        auto outputs = ctx.named_outputs();
+        auto it = outputs.find("pool1");
+        if (it != outputs.end() && it->second) {
+            auto output_shape = it->second->shape();
             MI_LOG_INFO("Output shape: " + output_shape.to_string());
         }
     } else {
@@ -137,9 +138,9 @@ int main() {
     MI_LOG_INFO("  Opt: [4, 3, 384, 384]");
     MI_LOG_INFO("  Max: [8, 3, 512, 512]");
     
-    // Step 3: Build engine
+    // Step 3: Build inference plan
     MI_LOG_INFO("");
-    MI_LOG_INFO("[Step 3] Building engine with dynamic shape support...");
+    MI_LOG_INFO("[Step 3] Building plan with dynamic shape support...");
     
     runtime::EngineConfig config;
     config.enable_dynamic_shapes = true;
@@ -148,34 +149,40 @@ int main() {
     config.enable_graph_optimization = true;
     config.enable_memory_planning = true;
     
-    runtime::Engine engine(config);
-    auto status = engine.build(graph);
+    auto plan = std::make_shared<runtime::InferencePlan>(config);
+    auto status = plan->build(graph);
     
     if (status != core::Status::SUCCESS) {
-        MI_LOG_ERROR("Failed to build engine");
+        MI_LOG_ERROR("Failed to build plan");
         return 1;
     }
     
-    MI_LOG_INFO("Engine built successfully!");
+    auto ctx = plan->create_execution_context();
+    if (!ctx) {
+        MI_LOG_ERROR("Failed to create execution context");
+        return 1;
+    }
+
+    MI_LOG_INFO("Plan built successfully!");
     
     // Step 4: Test with various input shapes
     MI_LOG_INFO("");
     MI_LOG_INFO("[Step 4] Running inference with different shapes...");
     
     // Test 1: Min shape
-    run_inference(engine, "Min shape (batch=1)", core::Shape({1, 3, 224, 224}));
+    run_inference(*plan, *ctx, "Min shape (batch=1)", core::Shape({1, 3, 224, 224}));
     
     // Test 2: Optimal shape
-    run_inference(engine, "Optimal shape (batch=4)", core::Shape({4, 3, 384, 384}));
+    run_inference(*plan, *ctx, "Optimal shape (batch=4)", core::Shape({4, 3, 384, 384}));
     
     // Test 3: Different batch size
-    run_inference(engine, "Different batch (batch=2)", core::Shape({2, 3, 256, 256}));
+    run_inference(*plan, *ctx, "Different batch (batch=2)", core::Shape({2, 3, 256, 256}));
     
     // Test 4: Max shape
-    run_inference(engine, "Max shape (batch=8)", core::Shape({8, 3, 512, 512}));
+    run_inference(*plan, *ctx, "Max shape (batch=8)", core::Shape({8, 3, 512, 512}));
     
     // Test 5: Back to min shape (test caching)
-    run_inference(engine, "Back to min (cache test)", core::Shape({1, 3, 224, 224}));
+    run_inference(*plan, *ctx, "Back to min (cache test)", core::Shape({1, 3, 224, 224}));
     
     // Test 6: Out of range (should fail)
     MI_LOG_INFO("");
@@ -191,8 +198,10 @@ int main() {
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> invalid_inputs;
     invalid_inputs["input"] = invalid_input;
     
-    std::unordered_map<std::string, std::shared_ptr<core::Tensor>> invalid_outputs;
-    status = engine.forward(invalid_inputs, invalid_outputs);
+    status = ctx->set_inputs(invalid_inputs);
+    if (status == core::Status::SUCCESS) {
+        status = plan->execute(ctx.get());
+    }
     
     if (status != core::Status::SUCCESS) {
         MI_LOG_INFO("[EXPECTED] Validation correctly rejected out-of-range shape");
@@ -206,11 +215,11 @@ int main() {
     MI_LOG_INFO("Summary");
     MI_LOG_INFO("========================================");
     
-    const auto& plan = engine.get_memory_plan();
+    const auto& plan_stats = plan->get_memory_plan();
     MI_LOG_INFO("Memory Planning:");
-    MI_LOG_INFO("  Original:  " + std::to_string(plan.original_memory / 1024.0) + " KB");
-    MI_LOG_INFO("  Optimized: " + std::to_string(plan.total_memory / 1024.0) + " KB");
-    MI_LOG_INFO("  Saving:    " + std::to_string(plan.memory_saving_ratio * 100.0f) + "%");
+    MI_LOG_INFO("  Original:  " + std::to_string(plan_stats.original_memory / 1024.0) + " KB");
+    MI_LOG_INFO("  Optimized: " + std::to_string(plan_stats.total_memory / 1024.0) + " KB");
+    MI_LOG_INFO("  Saving:    " + std::to_string(plan_stats.memory_saving_ratio * 100.0f) + "%");
     
     MI_LOG_INFO("");
     MI_LOG_INFO("[SUCCESS] Dynamic Shape Advanced Demo Completed!");
@@ -218,4 +227,3 @@ int main() {
     
     return 0;
 }
-

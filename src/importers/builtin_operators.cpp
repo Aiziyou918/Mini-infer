@@ -1,8 +1,8 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
-#include "mini_infer/importers/builtin_operators.h"
-#include "mini_infer/importers/attribute_helper.h"
-#include "mini_infer/importers/weight_importer.h"
+#include "importers/internal/builtin_operators.h"
+#include "importers/internal/attribute_helper.h"
+#include "importers/internal/weight_importer.h"
 #include "mini_infer/utils/logger.h"
 #include "mini_infer/operators/conv2d.h"
 #include "mini_infer/operators/linear.h"
@@ -14,6 +14,45 @@
 
 namespace mini_infer {
 namespace importers {
+
+namespace {
+
+void register_node_outputs(ImporterContext& ctx,
+                           graph::Node& graph_node,
+                           const onnx::NodeProto& node,
+                           const std::string& node_name) {
+    for (int i = 0; i < node.output_size(); ++i) {
+        const std::string& output_name = node.output(i);
+        auto output_tensor = ctx.get_tensor(output_name);
+        if (!output_tensor) {
+            output_tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(output_name, output_tensor);
+        }
+        graph_node.output_tensors().push_back(output_tensor);
+        ctx.register_tensor_producer(output_name, node_name, i);
+    }
+}
+
+void connect_input_ports(ImporterContext& ctx,
+                         const onnx::NodeProto& node,
+                         const std::string& node_name) {
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        if (input_name.empty() || ctx.is_weight(input_name)) {
+            continue;
+        }
+        std::string src_node_name;
+        int src_port = 0;
+        if (ctx.get_tensor_producer(input_name, src_node_name, src_port)) {
+            (void)ctx.get_graph()->connect(src_node_name, node_name, src_port, i);
+        } else {
+            ctx.get_graph()->create_node(input_name);
+            (void)ctx.get_graph()->connect(input_name, node_name, 0, i);
+        }
+    }
+}
+
+} // namespace
 
 // =============================================================================
 // Conv Operator Importer
@@ -97,21 +136,10 @@ core::Status ConvImporter::import_operator(ImporterContext& ctx, const onnx::Nod
     graph_node->set_input_tensors(input_tensors);
     
     // Connect graph edges for non-weight inputs
-    for (int i = 0; i < node.input_size(); ++i) {
-        const std::string& input_name = node.input(i);
-        if (ctx.is_weight(input_name)) continue;
-        // Ensure source node exists, then connect src -> this node
-        ctx.get_graph()->create_node(input_name);
-        ctx.get_graph()->connect(input_name, node_name);
-    }
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensors
-    for (int i = 0; i < node.output_size(); ++i) {
-        const std::string& output_name = node.output(i);
-        auto output_tensor = std::make_shared<core::Tensor>();
-        ctx.register_tensor(output_name, output_tensor);
-        graph_node->output_tensors().push_back(output_tensor);
-    }
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -172,20 +200,10 @@ core::Status GemmImporter::import_operator(ImporterContext& ctx, const onnx::Nod
         graph_node->set_input_tensors(input_tensors);
         
         // Connect graph edges for non-weight inputs
-        for (int i = 0; i < node.input_size(); ++i) {
-            const std::string& input_name = node.input(i);
-            if (ctx.is_weight(input_name)) continue;
-            ctx.get_graph()->create_node(input_name);
-            ctx.get_graph()->connect(input_name, node_name);
-        }
+        connect_input_ports(ctx, node, node_name);
         
         // Register output tensors
-        for (int i = 0; i < node.output_size(); ++i) {
-            const std::string& output_name = node.output(i);
-            auto output_tensor = std::make_shared<core::Tensor>();
-            ctx.register_tensor(output_name, output_tensor);
-            graph_node->output_tensors().push_back(output_tensor);
-        }
+        register_node_outputs(ctx, *graph_node, node, node_name);
         
         ctx.add_node(graph_node);
         return core::Status::SUCCESS;
@@ -235,20 +253,10 @@ core::Status MatMulImporter::import_operator(ImporterContext& ctx, const onnx::N
     graph_node->set_input_tensors(input_tensors);
     
     // Connect graph edges for non-weight inputs
-    for (int i = 0; i < node.input_size(); ++i) {
-        const std::string& input_name = node.input(i);
-        if (ctx.is_weight(input_name)) continue;
-        ctx.get_graph()->create_node(input_name);
-        ctx.get_graph()->connect(input_name, node_name);
-    }
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensors
-    for (int i = 0; i < node.output_size(); ++i) {
-        const std::string& output_name = node.output(i);
-        auto output_tensor = std::make_shared<core::Tensor>();
-        ctx.register_tensor(output_name, output_tensor);
-        graph_node->output_tensors().push_back(output_tensor);
-    }
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -284,14 +292,10 @@ core::Status ReluImporter::import_operator(ImporterContext& ctx, const onnx::Nod
     graph_node->set_input_tensors({input_tensor});
     
     // Connect graph edge: input -> relu
-    ctx.get_graph()->create_node(input_name);
-    ctx.get_graph()->connect(input_name, node_name);
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensor
-    const std::string& output_name = node.output(0);
-    auto output_tensor = std::make_shared<core::Tensor>();
-    ctx.register_tensor(output_name, output_tensor);
-    graph_node->output_tensors().push_back(output_tensor);
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -357,14 +361,10 @@ core::Status MaxPoolImporter::import_operator(ImporterContext& ctx, const onnx::
     graph_node->set_input_tensors({input_tensor});
     
     // Connect graph edge: input -> maxpool
-    ctx.get_graph()->create_node(input_name);
-    ctx.get_graph()->connect(input_name, node_name);
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensor
-    const std::string& output_name = node.output(0);
-    auto output_tensor = std::make_shared<core::Tensor>();
-    ctx.register_tensor(output_name, output_tensor);
-    graph_node->output_tensors().push_back(output_tensor);
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -428,11 +428,11 @@ core::Status AveragePoolImporter::import_operator(ImporterContext& ctx, const on
     }
     graph_node->set_input_tensors({input_tensor});
     
+    // Connect graph edge: input -> averagepool
+    connect_input_ports(ctx, node, node_name);
+    
     // Register output tensor
-    const std::string& output_name = node.output(0);
-    auto output_tensor = std::make_shared<core::Tensor>();
-    ctx.register_tensor(output_name, output_tensor);
-    graph_node->output_tensors().push_back(output_tensor);
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -576,18 +576,10 @@ core::Status ReshapeImporter::import_operator(ImporterContext& ctx, const onnx::
     graph_node->set_input_tensors(input_tensors);
     
     // Connect graph edges for non-weight inputs
-    for (int i = 0; i < node.input_size(); ++i) {
-        const std::string& input_name = node.input(i);
-        if (ctx.is_weight(input_name)) continue;
-        ctx.get_graph()->create_node(input_name);
-        ctx.get_graph()->connect(input_name, node_name);
-    }
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensor
-    const std::string& output_name = node.output(0);
-    auto output_tensor = std::make_shared<core::Tensor>();
-    ctx.register_tensor(output_name, output_tensor);
-    graph_node->output_tensors().push_back(output_tensor);
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
@@ -631,18 +623,10 @@ core::Status FlattenImporter::import_operator(ImporterContext& ctx, const onnx::
     graph_node->set_input_tensors({input_tensor});
     
     // Connect graph edges for non-weight inputs
-    for (int i = 0; i < node.input_size(); ++i) {
-        const std::string& input_name = node.input(i);
-        if (ctx.is_weight(input_name)) continue;
-        ctx.get_graph()->create_node(input_name);
-        ctx.get_graph()->connect(input_name, node_name);
-    }
+    connect_input_ports(ctx, node, node_name);
     
     // Register output tensor
-    const std::string& output_name = node.output(0);
-    auto output_tensor = std::make_shared<core::Tensor>();
-    ctx.register_tensor(output_name, output_tensor);
-    graph_node->output_tensors().push_back(output_tensor);
+    register_node_outputs(ctx, *graph_node, node, node_name);
     
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;

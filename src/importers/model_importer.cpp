@@ -1,7 +1,7 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
-#include "mini_infer/importers/model_importer.h"
-#include "mini_infer/importers/weight_importer.h"
+#include "importers/internal/model_importer.h"
+#include "importers/internal/weight_importer.h"
 #include "mini_infer/utils/logger.h"
 #include "onnx.pb.h"
 

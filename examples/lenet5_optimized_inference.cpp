@@ -34,7 +34,8 @@
 #include "mini_infer/graph/fusion_pass.h"
 #include "mini_infer/graph/graph_optimizer.h"
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/runtime/engine.h"
+#include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/inference_plan.h"
 #include "utils/simple_loader.h"
 
 
@@ -90,7 +91,8 @@ struct SampleResult {
     bool correct;
 };
 
-BenchmarkResult benchmark_engine(std::shared_ptr<runtime::Engine> engine,
+BenchmarkResult benchmark_engine(std::shared_ptr<runtime::InferencePlan> plan,
+                                 runtime::ExecutionContext& ctx,
                                  const std::string& input_name, const std::string& output_name,
                                  const std::vector<fs::path>& sample_files, bool verbose = false,
                                  std::vector<SampleResult>* collected_results = nullptr) {
@@ -109,8 +111,10 @@ BenchmarkResult benchmark_engine(std::shared_ptr<runtime::Engine> engine,
             inputs[input_name] = input_tensor;
 
             // Execute inference
-            std::unordered_map<std::string, std::shared_ptr<core::Tensor>> outputs;
-            auto status = engine->forward(inputs, outputs);
+            auto status = ctx.set_inputs(inputs);
+            if (status == core::Status::SUCCESS) {
+                status = plan->execute(&ctx);
+            }
 
             if (status != core::Status::SUCCESS) {
                 if (verbose) {
@@ -120,7 +124,9 @@ BenchmarkResult benchmark_engine(std::shared_ptr<runtime::Engine> engine,
             }
 
             // Get output
-            auto output_tensor = outputs[output_name];
+            auto outputs = ctx.named_outputs();
+            auto it = outputs.find(output_name);
+            auto output_tensor = it != outputs.end() ? it->second : nullptr;
             if (!output_tensor) {
                 if (verbose) {
                     std::cerr << "Error: Output tensor not found for " << filepath.filename()
@@ -371,26 +377,32 @@ int main(int argc, char** argv) {
         // Step 3: Build engine
         // ========================================================================
         std::cout << std::string(80, '=') << std::endl;
-        std::cout << "Step 3: Building Runtime Engine" << std::endl;
+        std::cout << "Step 3: Building Inference Plan" << std::endl;
         std::cout << std::string(80, '=') << std::endl;
 
         runtime::EngineConfig config;
         config.device_type = core::DeviceType::CPU;
         config.enable_profiling = false;
 
-        auto engine = std::make_shared<runtime::Engine>(config);
-        auto status = engine->build(graph);
+        auto plan = std::make_shared<runtime::InferencePlan>(config);
+        auto status = plan->build(graph);
 
         if (status != core::Status::SUCCESS) {
-            std::cerr << "Failed to build engine" << std::endl;
+            std::cerr << "Failed to build plan" << std::endl;
             return 1;
         }
 
-        std::cout << "[SUCCESS] Engine built successfully!" << std::endl;
+        auto ctx = plan->create_execution_context();
+        if (!ctx) {
+            std::cerr << "Failed to create execution context" << std::endl;
+            return 1;
+        }
+
+        std::cout << "[SUCCESS] Plan built successfully!" << std::endl;
 
         // Get input and output names
-        auto input_names = engine->get_input_names();
-        auto output_names = engine->get_output_names();
+        auto input_names = plan->get_input_names();
+        auto output_names = plan->get_output_names();
 
         std::cout << "  Inputs: ";
         for (const auto& name : input_names) {
@@ -420,8 +432,9 @@ int main(int argc, char** argv) {
         std::cout << std::endl;
 
         std::vector<SampleResult> detailed_results;
-        auto result = benchmark_engine(engine, input_names[0], output_names[0], sample_files,
-                                       verbose, output_json.empty() ? nullptr : &detailed_results);
+        auto result =
+            benchmark_engine(plan, *ctx, input_names[0], output_names[0], sample_files, verbose,
+                             output_json.empty() ? nullptr : &detailed_results);
 
         // ========================================================================
         // Step 5: Results display

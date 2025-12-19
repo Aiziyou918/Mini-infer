@@ -1,8 +1,8 @@
 #ifdef MINI_INFER_ONNX_ENABLED
 
 #include "mini_infer/importers/onnx_parser.h"
-#include "mini_infer/importers/model_importer.h"
-#include "mini_infer/importers/operator_importer.h"
+#include "importers/internal/model_importer.h"
+#include "importers/internal/operator_importer.h"
 #include "mini_infer/utils/logger.h"
 #include "onnx.pb.h"
 
@@ -12,14 +12,18 @@
 namespace mini_infer {
 namespace importers {
 
+struct OnnxParser::Impl {
+    std::unique_ptr<OperatorRegistry> operator_registry;
+    std::unique_ptr<ModelImporter> model_importer;
+
+    Impl() {
+        operator_registry = std::make_unique<OperatorRegistry>();
+        model_importer = std::make_unique<ModelImporter>(operator_registry.get());
+    }
+};
+
 OnnxParser::OnnxParser()
-    : verbose_(false) {
-    // Create operator registry
-    operator_registry_ = std::make_unique<OperatorRegistry>();
-    
-    // Create model importer
-    model_importer_ = std::make_unique<ModelImporter>(operator_registry_.get());
-    
+    : verbose_(false), impl_(std::make_unique<Impl>()) {
     MI_LOG_INFO("[OnnxParser] ONNX Parser initialized (TensorRT-inspired architecture)");
 }
 
@@ -72,21 +76,17 @@ std::unique_ptr<graph::Graph> OnnxParser::parse_from_buffer(const void* buffer, 
     log_info("Protobuf parsed successfully");
     
     // Set verbose mode for model importer
-    model_importer_->set_verbose(verbose_);
+    impl_->model_importer->set_verbose(verbose_);
     
     // Import model
-    auto graph = model_importer_->import_model(model);
+    auto graph = impl_->model_importer->import_model(model);
     if (!graph) {
-        set_error("Failed to import ONNX model: " + model_importer_->get_error());
+        set_error("Failed to import ONNX model: " + impl_->model_importer->get_error());
         return nullptr;
     }
     
     log_info("ONNX model imported successfully");
     return graph;
-}
-
-OperatorRegistry& OnnxParser::get_registry() {
-    return *operator_registry_;
 }
 
 void OnnxParser::set_error(const std::string& message) {

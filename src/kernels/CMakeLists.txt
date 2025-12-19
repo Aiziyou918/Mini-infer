@@ -7,6 +7,10 @@ set(KERNEL_SOURCES
     cpu/conv2d_cpu.cpp
     cpu/transpose_cpu.cpp
     cpu/pooling_cpu.cpp
+    cpu/relu_cpu.cpp
+    cpu/flatten_cpu.cpp
+    cpu/reshape_cpu.cpp
+    cpu/softmax_cpu.cpp
 )
 
 add_library(mini_infer_kernels STATIC ${KERNEL_SOURCES})

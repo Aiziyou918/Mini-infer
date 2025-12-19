@@ -41,6 +41,8 @@ target_link_libraries(mini_infer_importers
 target_include_directories(mini_infer_importers
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${ONNX_INCLUDE_DIR}
     # Note: Protobuf include paths are handled by protobuf::libprotobuf target
 )
