@@ -56,7 +56,7 @@ class FusionPass : public OptimizationPass {
      * @return true if fusion was performed
      */
     bool try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> conv_node,
-                                  std::unordered_set<std::string>& nodes_to_delete);
+                                  std::unordered_set<size_t>& nodes_to_delete);
 
     // Future fusion functions:
     // bool try_fuse_conv_bn(Graph* graph, std::shared_ptr<Node> conv_node, ...);

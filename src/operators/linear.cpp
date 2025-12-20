@@ -10,7 +10,8 @@
 namespace mini_infer {
 namespace operators {
 
-Linear::Linear(const LinearParam& param) : Operator(core::op_names::kLinear), param_(param) {}
+Linear::Linear(const LinearParam& param)
+    : Operator(core::op_names::kLinear, core::OpType::kGEMM), param_(param) {}
 
 core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                              std::vector<std::shared_ptr<core::Tensor>>& outputs) {

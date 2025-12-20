@@ -9,7 +9,8 @@ namespace operators {
 // Register Reshape operator
 REGISTER_OPERATOR(Reshape, Reshape);
 
-Reshape::Reshape(const ReshapeParam& param) : Operator(core::op_names::kReshape), param_(param) {}
+Reshape::Reshape(const ReshapeParam& param)
+    : Operator(core::op_names::kReshape, core::OpType::kRESHAPE), param_(param) {}
 
 core::Status Reshape::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                               std::vector<std::shared_ptr<core::Tensor>>& outputs) {
@@ -34,8 +35,8 @@ core::Status Reshape::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.outputs = &outputs;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kRESHAPE,
-                                                           input->device(), input->dtype());
+    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kRESHAPE, input->device(),
+                                                           input->dtype());
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

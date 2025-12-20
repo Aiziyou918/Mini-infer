@@ -6,7 +6,8 @@
 namespace mini_infer {
 namespace operators {
 
-Softmax::Softmax(const SoftmaxParam& param) : Operator(core::op_names::kSoftmax), param_(param) {}
+Softmax::Softmax(const SoftmaxParam& param)
+    : Operator(core::op_names::kSoftmax, core::OpType::kSOFTMAX), param_(param) {}
 
 core::Status Softmax::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                               std::vector<std::shared_ptr<core::Tensor>>& outputs) {
@@ -24,8 +25,7 @@ core::Status Softmax::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.device_context = kernels::get_current_device_context();
 
     auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kSOFTMAX,
-                                                           inputs[0]->device(),
-                                                           inputs[0]->dtype());
+                                                           inputs[0]->device(), inputs[0]->dtype());
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

@@ -8,7 +8,8 @@
 namespace mini_infer {
 namespace operators {
 
-Conv2D::Conv2D(const Conv2DParam& param) : Operator(core::op_names::kConv), param_(param) {}
+Conv2D::Conv2D(const Conv2DParam& param)
+    : Operator(core::op_names::kConv, core::OpType::kCONVOLUTION), param_(param) {}
 
 core::Status Conv2D::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                              std::vector<std::shared_ptr<core::Tensor>>& outputs) {

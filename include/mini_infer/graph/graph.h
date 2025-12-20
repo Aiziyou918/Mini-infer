@@ -1,12 +1,13 @@
 #pragma once
 
-#include "mini_infer/graph/node.h"
-#include "mini_infer/core/types.h"
-
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "mini_infer/core/types.h"
+#include "mini_infer/graph/node.h"
+
 
 namespace mini_infer {
 namespace graph {
@@ -15,11 +16,11 @@ namespace graph {
  * @brief Graph: manage nodes, connections and execution order.
  */
 class Graph {
-public:
+   public:
     Graph() = default;
     ~Graph() = default;
 
-    // Non-copyable, movable (避免误复制整图，提高语义清晰度)
+    // Non-copyable, movable
     Graph(const Graph&) = delete;
     Graph& operator=(const Graph&) = delete;
     Graph(Graph&&) noexcept = default;
@@ -38,6 +39,12 @@ public:
     std::shared_ptr<Node> get_node(const std::string& name) const;
 
     /**
+     * @brief Get node by id.
+     * @return nullptr if not found.
+     */
+    std::shared_ptr<Node> get_node(size_t id) const;
+
+    /**
      * @brief Add a pre-constructed node into the graph.
      * If a node with the same name exists, it will be overwritten.
      */
@@ -50,11 +57,17 @@ public:
     void remove_node(const std::string& name);
 
     /**
-     * @brief Connect two nodes by name: src(src_port) -> dst(dst_port).
+     * @brief Connect two nodes by id: src(src_port) -> dst(dst_port).
      * This will:
      *  - validate both nodes exist
      *  - reject self-loop (src == dst)
      *  - avoid duplicate edges (idempotent)
+     */
+    [[nodiscard]] core::Status connect(size_t src_id, size_t dst_id, int src_port = 0,
+                                       int dst_port = 0);
+
+    /**
+     * @brief Connect two nodes by name: src(src_port) -> dst(dst_port).
      */
     [[nodiscard]] core::Status connect(const std::string& src_name, const std::string& dst_name,
                                        int src_port = 0, int dst_port = 0);
@@ -74,12 +87,16 @@ public:
     /**
      * @brief Get input node names.
      */
-    const std::vector<std::string>& inputs() const noexcept { return input_names_; }
+    const std::vector<std::string>& inputs() const noexcept {
+        return input_names_;
+    }
 
     /**
      * @brief Get output node names.
      */
-    const std::vector<std::string>& outputs() const noexcept { return output_names_; }
+    const std::vector<std::string>& outputs() const noexcept {
+        return output_names_;
+    }
 
     /**
      * @brief Topological sort of the whole graph.
@@ -88,8 +105,8 @@ public:
      *  - O(V + E)
      *  - If there's a cycle, returns ERROR_RUNTIME.
      */
-    [[nodiscard]] core::Status
-    topological_sort(std::vector<std::shared_ptr<Node>>& sorted_nodes) const;
+    [[nodiscard]] core::Status topological_sort(
+        std::vector<std::shared_ptr<Node>>& sorted_nodes) const;
 
     /**
      * @brief Validate inputs/outputs and obtain a topological order.
@@ -120,12 +137,19 @@ public:
     [[nodiscard]] core::Status validate() const;
 
     /**
-     * @brief Access all nodes.
+     * @brief Access all nodes by id.
      */
-    const std::unordered_map<std::string, std::shared_ptr<Node>>&
-    nodes() const noexcept {
-        return nodes_;
-    }
+    const std::vector<std::shared_ptr<Node>>& nodes() const noexcept { return nodes_; }
+
+    /**
+     * @brief Total node slots (max id + 1).
+     */
+    size_t node_capacity() const noexcept { return nodes_.size(); }
+
+    /**
+     * @brief Count of active nodes.
+     */
+    size_t node_count() const noexcept { return name_to_id_.size(); }
 
     /**
      * @brief Helper: check if a name is marked as graph input.
@@ -137,11 +161,12 @@ public:
      */
     bool is_output(const std::string& name) const;
 
-private:
-    std::unordered_map<std::string, std::shared_ptr<Node>> nodes_;
+   private:
+    std::vector<std::shared_ptr<Node>> nodes_;
+    std::unordered_map<std::string, size_t> name_to_id_;
     std::vector<std::string> input_names_;
     std::vector<std::string> output_names_;
 };
 
-} // namespace graph
-} // namespace mini_infer
+}  // namespace graph
+}  // namespace mini_infer

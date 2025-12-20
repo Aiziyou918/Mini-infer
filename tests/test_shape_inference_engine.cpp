@@ -59,11 +59,6 @@ protected:
         
         graph->set_outputs({"pool1"});
 
-        std::vector<std::shared_ptr<graph::Node>> topo;
-        ASSERT_EQ(graph->checked_topological_sort(topo), core::Status::SUCCESS);
-        for (size_t i = 0; i < topo.size(); ++i) {
-            topo[i]->set_id(i);
-        }
     }
     
     std::shared_ptr<graph::Graph> graph;

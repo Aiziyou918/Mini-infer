@@ -60,17 +60,17 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
         MI_LOG_INFO("[ShapeInferenceEngine] Starting runtime shape inference...");
         MI_LOG_INFO("[ShapeInferenceEngine] Input shapes:");
         for (const auto& binding : input_shapes) {
-            if (binding.node_id < sorted_nodes_.size() && sorted_nodes_[binding.node_id]) {
-                MI_LOG_INFO("[ShapeInferenceEngine]   " +
-                            sorted_nodes_[binding.node_id]->name() + ": " +
+            auto node = graph_->get_node(binding.node_id);
+            if (node) {
+                MI_LOG_INFO("[ShapeInferenceEngine]   " + node->name() + ": " +
                             binding.shape.to_string());
             }
         }
     }
 
-    // Resize storage to fit all nodes
+    // Resize storage to fit all node ids
     inferred_shapes_.clear();
-    inferred_shapes_.resize(sorted_nodes_.size());
+    inferred_shapes_.resize(graph_->node_capacity());
 
     // Store input shapes (by node ID)
     for (const auto& binding : input_shapes) {
@@ -185,8 +185,9 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
     last_input_shapes_ = input_shapes;
     last_input_shapes_lookup_.clear();
     for (const auto& binding : input_shapes) {
-        if (binding.node_id < sorted_nodes_.size() && sorted_nodes_[binding.node_id]) {
-            last_input_shapes_lookup_[sorted_nodes_[binding.node_id]->name()] = binding.shape;
+        auto node = graph_->get_node(binding.node_id);
+        if (node) {
+            last_input_shapes_lookup_[node->name()] = binding.shape;
         }
     }
 

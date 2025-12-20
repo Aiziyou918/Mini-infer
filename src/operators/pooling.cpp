@@ -9,8 +9,9 @@ namespace mini_infer {
 namespace operators {
 
 Pooling::Pooling(const PoolingParam& param)
-    : Operator(param.type == PoolingType::MAX ? core::op_names::kMaxPool
-                                              : core::op_names::kAveragePool),
+    : Operator(
+          param.type == PoolingType::MAX ? core::op_names::kMaxPool : core::op_names::kAveragePool,
+          param.type == PoolingType::MAX ? core::OpType::kMAX_POOL : core::OpType::kAVERAGE_POOL),
       param_(param) {
     // Validate parameters
     if (param_.kernel_h <= 0 || param_.kernel_w <= 0) {
@@ -58,8 +59,8 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     }
 
     const auto dtype = input->dtype();
-    const auto op_type = (param_.type == PoolingType::MAX) ? core::OpType::kMAX_POOL
-                                                           : core::OpType::kAVERAGE_POOL;
+    const auto op_type =
+        (param_.type == PoolingType::MAX) ? core::OpType::kMAX_POOL : core::OpType::kAVERAGE_POOL;
 
     kernels::KernelContext ctx;
     ctx.inputs = &inputs;
@@ -67,8 +68,7 @@ core::Status Pooling::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.op_param = &param_;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel =
-        kernels::KernelRegistry::instance().find(op_type, input->device(), dtype);
+    auto kernel = kernels::KernelRegistry::instance().find(op_type, input->device(), dtype);
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

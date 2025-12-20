@@ -25,15 +25,15 @@ core::Status FusionPass::apply(Graph* graph, int& num_modifications) {
     // Phase 2: Batch delete marked nodes
 
     const auto& all_nodes = graph->nodes();
-    std::unordered_set<std::string> nodes_to_delete;
+    std::unordered_set<size_t> nodes_to_delete;
 
     // Phase 1: Mark - Traverse and fuse
-    for (const auto& [name, node] : all_nodes) {
+    for (const auto& node : all_nodes) {
         if (!node || !node->get_operator()) {
             continue;
         }
 
-        if (nodes_to_delete.count(name) > 0) {
+        if (nodes_to_delete.count(node->id()) > 0) {
             continue;
         }
 
@@ -51,11 +51,11 @@ core::Status FusionPass::apply(Graph* graph, int& num_modifications) {
     auto outputs = graph->outputs();
     bool outputs_changed = false;
     for (auto& output_name : outputs) {
-        if (nodes_to_delete.count(output_name) > 0) {
+        auto output_node = graph->get_node(output_name);
+        if (output_node && nodes_to_delete.count(output_node->id()) > 0) {
             // Find the node that will be deleted and get its predecessor
-            auto node = graph->get_node(output_name);
-            if (node && !node->inputs().empty()) {
-                auto& input_edge = node->inputs()[0];
+            if (!output_node->inputs().empty()) {
+                auto& input_edge = output_node->inputs()[0];
                 if (input_edge.node) {
                     output_name = input_edge.node->name();
                     outputs_changed = true;
@@ -68,8 +68,11 @@ core::Status FusionPass::apply(Graph* graph, int& num_modifications) {
     }
 
     // Phase 2: Sweep - Batch deletion
-    for (const auto& node_name : nodes_to_delete) {
-        graph->remove_node(node_name);
+    for (const auto& node_id : nodes_to_delete) {
+        auto node = graph->get_node(node_id);
+        if (node) {
+            graph->remove_node(node->name());
+        }
     }
 
     if (num_modifications > 0) {
@@ -81,7 +84,7 @@ core::Status FusionPass::apply(Graph* graph, int& num_modifications) {
 }
 
 bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> conv_node,
-                                          std::unordered_set<std::string>& nodes_to_delete) {
+                                          std::unordered_set<size_t>& nodes_to_delete) {
     // Check: Conv must have exactly one consumer
     if (conv_node->outputs().size() != 1) {
         return false;
@@ -93,7 +96,7 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
     }
 
     // Check: Not already marked for deletion
-    if (nodes_to_delete.count(activation_node->name()) > 0) {
+    if (nodes_to_delete.count(activation_node->id()) > 0) {
         return false;
     }
 
@@ -136,11 +139,11 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
                                              }),
                               consumer_inputs.end());
 
-        (void)graph->connect(conv_node->name(), edge.node->name(), edge.src_port, edge.dst_port);
+        (void)graph->connect(conv_node->id(), edge.node->id(), edge.src_port, edge.dst_port);
     }
 
     // Mark for deletion (deferred)
-    nodes_to_delete.insert(activation_node->name());
+    nodes_to_delete.insert(activation_node->id());
 
     return true;
 }

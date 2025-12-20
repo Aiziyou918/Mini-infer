@@ -127,12 +127,12 @@ std::vector<std::string> LivenessAnalyzer::collect_tensors(graph::Graph* graph) 
     std::vector<std::string> tensors;
 
     // 遍历所有节点，收集输出Tensor
-    for (const auto& [name, node] : graph->nodes()) {
-        if (!node)
+    for (const auto& node : graph->nodes()) {
+        if (!node) {
             continue;
-
+        }
         // 节点的输出Tensor通常以节点名命名
-        tensors.push_back(name);
+        tensors.push_back(node->name());
     }
 
     return tensors;
@@ -142,17 +142,20 @@ void LivenessAnalyzer::compute_producers_consumers(
     graph::Graph* graph, std::unordered_map<std::string, std::string>& producers,
     std::unordered_map<std::string, std::vector<std::string>>& consumers) {
     // 遍历所有节点
-    for (const auto& [node_name, node] : graph->nodes()) {
-        if (!node)
+    for (const auto& node : graph->nodes()) {
+        if (!node) {
             continue;
+        }
 
+        const std::string& node_name = node->name();
         // 该节点是其输出Tensor的生产者
         producers[node_name] = node_name;
 
         // 该节点消费其输入节点的输出
         for (const auto& edge : node->inputs()) {
-            if (!edge.node)
+            if (!edge.node) {
                 continue;
+            }
             consumers[edge.node->name()].push_back(node_name);
         }
     }

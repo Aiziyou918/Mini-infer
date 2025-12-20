@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<graph::Graph> graph = std::move(graph_uptr);
 
         std::cout << "[SUCCESS] Model parsed successfully!" << std::endl;
-        std::cout << "  Graph nodes: " << graph->nodes().size() << std::endl;
+        std::cout << "  Graph nodes: " << graph->node_count() << std::endl;
         std::cout << std::endl;
 
         // ========================================================================
@@ -345,7 +345,7 @@ int main(int argc, char** argv) {
             std::cout << "Step 2: Graph Optimization (TensorRT-style)" << std::endl;
             std::cout << std::string(80, '=') << std::endl;
 
-            size_t nodes_before = graph->nodes().size();
+            size_t nodes_before = graph->node_count();
 
             graph::GraphOptimizer optimizer;
             optimizer.set_verbose(true);
@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Warning: Graph optimization failed" << std::endl;
             } else {
                 const auto& stats = optimizer.get_statistics();
-                size_t nodes_after = graph->nodes().size();
+                size_t nodes_after = graph->node_count();
 
                 std::cout << "\n[OPTIMIZATION RESULTS]" << std::endl;
                 std::cout << "  Total passes: " << stats.total_passes << std::endl;

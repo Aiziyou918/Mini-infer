@@ -396,7 +396,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<graph::Graph> graph = std::move(graph_uptr);
         
         std::cout << "[SUCCESS] Model parsed successfully!" << std::endl;
-        std::cout << "Graph has " << graph->nodes().size() << " nodes" << std::endl;
+        std::cout << "Graph has " << graph->node_count() << " nodes" << std::endl;
         std::cout << std::endl;
         
         // Step 2: Build Inference Plan

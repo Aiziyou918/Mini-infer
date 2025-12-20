@@ -30,13 +30,15 @@ int main(int argc, char* argv[]) {
     }
     
     MI_LOG_INFO("ONNX model parsed successfully!");
-    MI_LOG_INFO("Graph nodes: " + std::to_string(graph->nodes().size()));
+    MI_LOG_INFO("Graph nodes: " + std::to_string(graph->node_count()));
     
     // Print node information
     const auto& nodes = graph->nodes();
     size_t i = 0;
-    for (const auto& pair : nodes) {
-        const auto& node = pair.second;
+    for (const auto& node : nodes) {
+        if (!node) {
+            continue;
+        }
         MI_LOG_INFO("Node[" + std::to_string(i++) + "]: " + node->name());
         // Note: node->get_operator() may be null during import
     }

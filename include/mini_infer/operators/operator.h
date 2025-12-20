@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "mini_infer/core/op_type.h"
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/core/types.h"
 
@@ -24,7 +25,12 @@ struct OpParam {
  */
 class Operator {
    public:
-    explicit Operator(const std::string& name) : name_(name) {}
+    explicit Operator(const std::string& name)
+        : name_(name), op_type_(core::string_to_op_type(name)) {}
+
+    explicit Operator(const std::string& name, core::OpType op_type)
+        : name_(name), op_type_(op_type) {}
+
     virtual ~Operator() = default;
 
     /*
@@ -54,6 +60,14 @@ class Operator {
     }
 
     /**
+     * @brief Get the OpType of the operator
+     * @return The OpType of the operator
+     */
+    core::OpType type() const {
+        return op_type_;
+    }
+
+    /**
      * @brief Set the parameter of the operator
      * @param param The parameter of the operator
      */
@@ -63,6 +77,7 @@ class Operator {
 
    protected:
     std::string name_;                //< The name of the operator
+    core::OpType op_type_;            //< The OpType of the operator (cached for fast access)
     std::shared_ptr<OpParam> param_;  //< The parameter of the operator
 };
 

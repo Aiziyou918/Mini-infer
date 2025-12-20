@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <queue>
 
+#include "mini_infer/graph/graph_optimizer.h"
 
 namespace mini_infer {
 namespace graph {
@@ -12,23 +13,32 @@ std::shared_ptr<Node> Graph::create_node(const std::string& name) {
         return nullptr;
     }
 
-    auto it = nodes_.find(name);
-    if (it != nodes_.end()) {
+    auto it = name_to_id_.find(name);
+    if (it != name_to_id_.end()) {
         // Reuse existing node to avoid duplicate definition
-        return it->second;
+        return get_node(it->second);
     }
 
     auto node = std::make_shared<Node>(name);
-    nodes_.emplace(name, node);
+    node->set_id(nodes_.size());
+    nodes_.push_back(node);
+    name_to_id_[name] = node->id();
     return node;
 }
 
 std::shared_ptr<Node> Graph::get_node(const std::string& name) const {
-    auto it = nodes_.find(name);
-    if (it == nodes_.end()) {
+    auto it = name_to_id_.find(name);
+    if (it == name_to_id_.end()) {
         return nullptr;
     }
-    return it->second;
+    return get_node(it->second);
+}
+
+std::shared_ptr<Node> Graph::get_node(size_t id) const {
+    if (id >= nodes_.size()) {
+        return nullptr;
+    }
+    return nodes_[id];
 }
 
 void Graph::add_node(const std::shared_ptr<Node>& node) {
@@ -39,63 +49,66 @@ void Graph::add_node(const std::shared_ptr<Node>& node) {
     if (name.empty()) {
         return;
     }
-    nodes_[name] = node;
+    auto it = name_to_id_.find(name);
+    if (it != name_to_id_.end()) {
+        const size_t id = it->second;
+        node->set_id(id);
+        nodes_[id] = node;
+        return;
+    }
+    node->set_id(nodes_.size());
+    nodes_.push_back(node);
+    name_to_id_[name] = node->id();
 }
 
 void Graph::remove_node(const std::string& name) {
-    auto it = nodes_.find(name);
-    if (it == nodes_.end()) {
+    auto it = name_to_id_.find(name);
+    if (it == name_to_id_.end()) {
         return;
     }
-    auto target = it->second;
-    // 清理所有节点中指向该节点的输入/输出引用，避免悬挂指针
-    for (auto& kv : nodes_) {
-        auto node = kv.second;
+    const size_t target_id = it->second;
+    auto target = get_node(target_id);
+    // Remove all edges pointing to the target node
+    for (auto& node : nodes_) {
         if (!node || node == target) {
             continue;
         }
-        // 清理 outputs 中的 target
+        // Remove all edges pointing to the target node
         auto& outs = node->mutable_outputs();
-        outs.erase(std::remove_if(outs.begin(), outs.end(),
-                                  [&](const Node::Edge& e) {
-                                      return e.node && e.node->name() == name;
-                                  }),
+        outs.erase(std::remove_if(
+                       outs.begin(), outs.end(),
+                       [&](const Node::Edge& e) { return e.node && e.node->id() == target_id; }),
                    outs.end());
-        // 清理 inputs 中的 target
+        // Remove all edges pointing to the target node
         auto& ins = node->mutable_inputs();
-        ins.erase(std::remove_if(ins.begin(), ins.end(),
-                                 [&](const Node::Edge& e) {
-                                     return e.node && e.node->name() == name;
-                                 }),
+        ins.erase(std::remove_if(
+                      ins.begin(), ins.end(),
+                      [&](const Node::Edge& e) { return e.node && e.node->id() == target_id; }),
                   ins.end());
     }
-    nodes_.erase(it);
+    nodes_[target_id] = nullptr;
+    name_to_id_.erase(it);
 }
 
-core::Status Graph::connect(const std::string& src_name, const std::string& dst_name, int src_port,
-                            int dst_port) {
-    if (src_name.empty() || dst_name.empty()) {
-        return core::Status::ERROR_INVALID_ARGUMENT;
-    }
+core::Status Graph::connect(size_t src_id, size_t dst_id, int src_port, int dst_port) {
     if (src_port < 0 || dst_port < 0) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-
-    if (src_name == dst_name) {
+    if (src_id == dst_id) {
         // Generally not allowed to have self-loops; if you need RNN-style, you can open it here and
         // modify the topological logic
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    auto src = get_node(src_name);
-    auto dst = get_node(dst_name);
+    auto src = get_node(src_id);
+    auto dst = get_node(dst_id);
     if (!src || !dst) {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
     // Avoid duplicate edges (idempotent)
     for (const auto& out : src->outputs()) {
-        if (out.node && out.node->name() == dst_name && out.src_port == src_port &&
+        if (out.node && out.node->id() == dst_id && out.src_port == src_port &&
             out.dst_port == dst_port) {
             return core::Status::SUCCESS;
         }
@@ -105,6 +118,19 @@ core::Status Graph::connect(const std::string& src_name, const std::string& dst_
     dst->add_input(src, src_port, dst_port);
 
     return core::Status::SUCCESS;
+}
+
+core::Status Graph::connect(const std::string& src_name, const std::string& dst_name, int src_port,
+                            int dst_port) {
+    if (src_name.empty() || dst_name.empty()) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    auto src = name_to_id_.find(src_name);
+    auto dst = name_to_id_.find(dst_name);
+    if (src == name_to_id_.end() || dst == name_to_id_.end()) {
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+    return connect(src->second, dst->second, src_port, dst_port);
 }
 
 void Graph::set_inputs(const std::vector<std::string>& input_names) {
@@ -136,21 +162,25 @@ bool Graph::is_output(const std::string& name) const {
 core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_nodes) const {
     sorted_nodes.clear();
 
-    const size_t num_nodes = nodes_.size();
-    if (num_nodes == 0) {
+    const size_t capacity = nodes_.size();
+    if (capacity == 0) {
         return core::Status::SUCCESS;
     }
 
     // 1) Initialize the in-degree table
-    std::unordered_map<std::string, int> in_degree;
-    in_degree.reserve(num_nodes);
-    for (const auto& kv : nodes_) {
-        in_degree.emplace(kv.first, 0);
+    std::vector<int> in_degree(capacity, 0);
+    std::vector<char> active(capacity, 0);
+    size_t active_count = 0;
+    for (const auto& node : nodes_) {
+        if (!node) {
+            continue;
+        }
+        active[node->id()] = 1;
+        active_count++;
     }
 
     // 2) Count the in-degree: build directed edges according to outputs
-    for (const auto& kv : nodes_) {
-        const auto& node = kv.second;
+    for (const auto& node : nodes_) {
         if (!node)
             continue;
 
@@ -158,9 +188,9 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
             if (!out.node) {
                 continue;
             }
-            auto it = in_degree.find(out.node->name());
-            if (it != in_degree.end()) {
-                ++(it->second);
+            const size_t out_id = out.node->id();
+            if (out_id < in_degree.size() && active[out_id]) {
+                ++in_degree[out_id];
             }
             // If out is not in in_degree, it means the graph structure is inconsistent, generally
             // it is a graph construction error Here we do not report an error directly, but let
@@ -170,20 +200,18 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
 
     // 3) Put the nodes with in-degree 0 into the queue
     std::queue<std::shared_ptr<Node>> q;
-    for (const auto& kv : nodes_) {
-        const auto& name = kv.first;
-        const auto& node = kv.second;
+    for (const auto& node : nodes_) {
         if (!node)
             continue;
 
-        auto it = in_degree.find(name);
-        if (it != in_degree.end() && it->second == 0) {
+        const size_t node_id = node->id();
+        if (node_id < in_degree.size() && in_degree[node_id] == 0) {
             q.push(node);
         }
     }
 
     // When the graph has a cycle, here will not cover all nodes
-    sorted_nodes.reserve(num_nodes);
+    sorted_nodes.reserve(active_count);
 
     // 4) Kahn algorithm
     while (!q.empty()) {
@@ -195,20 +223,20 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
         for (const auto& out : node->outputs()) {
             if (!out.node)
                 continue;
-            auto it = in_degree.find(out.node->name());
-            if (it == in_degree.end()) {
-                continue;  // Nodes not in nodes_ are ignored; handled by validate()
+            const size_t out_id = out.node->id();
+            if (out_id >= in_degree.size() || !active[out_id]) {
+                continue;
             }
 
-            --(it->second);
-            if (it->second == 0) {
+            --in_degree[out_id];
+            if (in_degree[out_id] == 0) {
                 q.push(out.node);
             }
         }
     }
 
     // 5) If not all nodes are covered, it means there is a cycle or illegal pointer
-    if (sorted_nodes.size() != num_nodes) {
+    if (sorted_nodes.size() != active_count) {
         return core::Status::ERROR_RUNTIME;
     }
 
@@ -219,29 +247,29 @@ core::Status Graph::checked_topological_sort(
     std::vector<std::shared_ptr<Node>>& sorted_nodes) const {
     // 1) Check if the input/output names exist
     for (const auto& name : input_names_) {
-        if (nodes_.find(name) == nodes_.end()) {
+        if (name_to_id_.find(name) == name_to_id_.end()) {
             return core::Status::ERROR_INVALID_ARGUMENT;
         }
     }
 
     for (const auto& name : output_names_) {
-        if (nodes_.find(name) == nodes_.end()) {
+        if (name_to_id_.find(name) == name_to_id_.end()) {
             return core::Status::ERROR_INVALID_ARGUMENT;
         }
     }
-
     // 2) Perform topological sorting to ensure DAG property and obtain order
     return topological_sort(sorted_nodes);
 }
 
 core::Status Graph::optimize() {
-    // TODO: Implement graph optimization (operator fusion, constant folding, etc.)
-    // - constant folding
-    // - dead node elimination (not reachable from inputs->outputs)
-    // - operator fusion (Conv+BN, etc.)
-    //
-    // Currently return SUCCESS, indicating that the existing process is not broken.
-    return core::Status::SUCCESS;
+    // Invoke the GraphOptimizer pipeline
+    // This will load and execute all registered optimization passes (e.g. constant folding, fusion)
+    auto optimizer = GraphOptimizer::create_default();
+
+    // You can enable verbose logging if needed
+    optimizer.set_verbose(true);
+
+    return optimizer.optimize(this);
 }
 
 core::Status Graph::validate() const {

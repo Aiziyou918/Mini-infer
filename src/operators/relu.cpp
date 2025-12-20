@@ -9,7 +9,7 @@
 namespace mini_infer {
 namespace operators {
 
-ReLU::ReLU() : Operator(core::op_names::kRelu) {}
+ReLU::ReLU() : Operator(core::op_names::kRelu, core::OpType::kRELU) {}
 
 core::Status ReLU::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                            std::vector<std::shared_ptr<core::Tensor>>& outputs) {

@@ -6,7 +6,8 @@
 namespace mini_infer {
 namespace operators {
 
-Flatten::Flatten(const FlattenParam& param) : Operator(core::op_names::kFlatten), param_(param) {}
+Flatten::Flatten(const FlattenParam& param)
+    : Operator(core::op_names::kFlatten, core::OpType::kFLATTEN), param_(param) {}
 
 core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
                               std::vector<std::shared_ptr<core::Tensor>>& outputs) {
@@ -31,8 +32,8 @@ core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.outputs = &outputs;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kFLATTEN,
-                                                           input->device(), input->dtype());
+    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kFLATTEN, input->device(),
+                                                           input->dtype());
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

@@ -24,7 +24,7 @@ core::Status ExecutionContext::initialize() {
 
     contexts_.emplace(core::DeviceType::CPU, std::make_shared<backends::CPUDeviceContext>());
     node_outputs_.clear();
-    node_outputs_.resize(plan_->sorted_nodes().size());
+    node_outputs_.resize(plan_->graph()->node_capacity());
 
     auto status = allocate_tensors();
     if (status != core::Status::SUCCESS) {

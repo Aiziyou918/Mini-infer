@@ -1,4 +1,5 @@
 #include "mini_infer/graph/node.h"
+#include "mini_infer/core/op_type.h"
 
 namespace mini_infer {
 namespace graph {
@@ -9,18 +10,11 @@ void Node::set_operator(std::shared_ptr<operators::Operator> op) {
     op_ = op;
 
     // Cache OpType for fast access during graph optimization
-    if (op_) {
-        cached_op_type_ = core::string_to_op_type(op_->name());
-    } else {
-        cached_op_type_ = core::OpType::kUNKNOWN;
-    }
+    cached_op_type_ = op_ ? op_->type() : core::OpType::kUNKNOWN;
 }
 
 const char* Node::type_name() const {
-    if (op_) {
-        return op_->name().c_str();  // Convert std::string to const char*
-    }
-    return "Unknown";
+    return op_ ? op_->name().c_str() : "Unknown";
 }
 
 void Node::add_input(const std::shared_ptr<Node>& input_node, int src_port, int dst_port) {

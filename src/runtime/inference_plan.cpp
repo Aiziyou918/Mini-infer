@@ -44,15 +44,6 @@ core::Status InferencePlan::build(std::shared_ptr<graph::Graph> graph) {
     MI_LOG_INFO("[InferencePlan] Topological sort completed: " +
                 std::to_string(sorted_nodes_.size()) + " nodes");
 
-    // Step 2.5: Assign unique IDs to nodes for fast runtime indexing
-    MI_LOG_INFO("[InferencePlan] Step 2.5: Assigning node IDs...");
-    for (size_t i = 0; i < sorted_nodes_.size(); ++i) {
-        if (sorted_nodes_[i]) {
-            sorted_nodes_[i]->set_id(i);
-        }
-    }
-    MI_LOG_INFO("[InferencePlan] Node ID assignment completed");
-
     auto binding_status = initialize_input_bindings();
     if (binding_status != core::Status::SUCCESS) {
         MI_LOG_ERROR("[InferencePlan] Failed to initialize input bindings");
