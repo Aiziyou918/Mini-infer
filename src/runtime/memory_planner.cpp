@@ -53,7 +53,7 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
 
     std::vector<TensorLifetime> lifetimes;
 
-    // Step 1: 拓扑排序，确定节点执行顺序
+    // Step 1: Topological sort, determine node execution order
     std::vector<std::shared_ptr<graph::Node>> topo_order;
     auto status = graph->topological_sort(topo_order);
     if (status != core::Status::SUCCESS) {
@@ -61,33 +61,33 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
         return {};
     }
 
-    // Step 2: 为每个节点分配时间戳
+    // Step 2: Assign timestamps to each node
     std::unordered_map<std::string, int> node_time;
     for (size_t i = 0; i < topo_order.size(); ++i) {
         node_time[topo_order[i]->name()] = static_cast<int>(i);
     }
 
-    // Step 3: 收集所有Tensor及其生产者/消费者
+    // Step 3: Collect all tensors and their producers/consumers
     std::unordered_map<std::string, std::string> producers;  // tensor -> producer_node
     std::unordered_map<std::string, std::vector<std::string>>
         consumers;  // tensor -> consumer_nodes
     compute_producers_consumers(graph, producers, consumers);
 
-    // Step 4: 计算每个Tensor的生命周期
+    // Step 4: Calculate the lifetime of each tensor
     for (const auto& [tensor_name, producer_name] : producers) {
         TensorLifetime lifetime;
         lifetime.name = tensor_name;
 
-        // Birth time: 生产该Tensor的节点的时间
+        // Birth time: The time when the node that produces this tensor
         auto it = node_time.find(producer_name);
         if (it != node_time.end()) {
             lifetime.birth_time = it->second;
         } else {
-            // 可能是图的输入Tensor
+            // May be graph input tensor
             lifetime.birth_time = 0;
         }
 
-        // Death time: 最后一个消费该Tensor的节点的时间
+        // Death time: The time when the last node that consumes this tensor
         lifetime.death_time = lifetime.birth_time;
         auto consumer_it = consumers.find(tensor_name);
         if (consumer_it != consumers.end()) {
@@ -99,16 +99,16 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
             }
         }
 
-        // 检查是否是持久化Tensor
+        // Check if the tensor is persistent
         lifetime.is_persistent = is_persistent_tensor(tensor_name, graph);
 
-        // 计算Tensor大小（如果有shape信息）
+        // Calculate tensor size (if shape information is available)
         lifetime.size_bytes = 0;
         auto node = graph->get_node(tensor_name);
         if (node && !node->output_tensors().empty() && node->output_tensors()[0]) {
             auto t = node->output_tensors()[0];
             const auto numel = t->shape().numel();
-            // 形状未推断时，size_in_bytes 也会为 0，需要兜底
+            // Fallback to 1024 bytes if size_in_bytes is not available
             const size_t bytes = t->size_in_bytes();
             lifetime.size_bytes = bytes > 0 ? bytes
                                             : (numel > 0 ? static_cast<size_t>(numel) * sizeof(float)
@@ -126,12 +126,12 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
 std::vector<std::string> LivenessAnalyzer::collect_tensors(graph::Graph* graph) {
     std::vector<std::string> tensors;
 
-    // 遍历所有节点，收集输出Tensor
+    // Iterate over all nodes and collect output tensors
     for (const auto& node : graph->nodes()) {
         if (!node) {
             continue;
         }
-        // 节点的输出Tensor通常以节点名命名
+        // The output tensor of a node is usually named after the node
         tensors.push_back(node->name());
     }
 
@@ -141,17 +141,17 @@ std::vector<std::string> LivenessAnalyzer::collect_tensors(graph::Graph* graph) 
 void LivenessAnalyzer::compute_producers_consumers(
     graph::Graph* graph, std::unordered_map<std::string, std::string>& producers,
     std::unordered_map<std::string, std::vector<std::string>>& consumers) {
-    // 遍历所有节点
+    // Iterate over all nodes
     for (const auto& node : graph->nodes()) {
         if (!node) {
             continue;
         }
 
         const std::string& node_name = node->name();
-        // 该节点是其输出Tensor的生产者
+        // The node is the producer of its output tensor
         producers[node_name] = node_name;
 
-        // 该节点消费其输入节点的输出
+        // The node consumes the output of its input nodes
         for (const auto& edge : node->inputs()) {
             if (!edge.node) {
                 continue;
@@ -162,15 +162,15 @@ void LivenessAnalyzer::compute_producers_consumers(
 }
 
 bool LivenessAnalyzer::is_persistent_tensor(const std::string& tensor_name, graph::Graph* graph) {
-    // 检查是否是图的输入或输出
+    // Check if the tensor is an input or output
     if (graph->is_input(tensor_name) || graph->is_output(tensor_name)) {
         return true;
     }
 
-    // TODO: 检查是否是权重Tensor（通常权重节点没有输入）
+    // TODO: Check if the tensor is a weight tensor (usually weight nodes have no inputs)
     auto node = graph->get_node(tensor_name);
     if (node && node->inputs().empty()) {
-        return true;  // 可能是权重或常量
+        return true; 
     }
 
     return false;
@@ -191,7 +191,7 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
 
     MI_LOG_INFO("[MemoryPlanner] Starting static memory planning...");
 
-    // Step 1: 生命周期分析
+    // Step 1: Lifetime analysis
     auto lifetimes = liveness_analyzer_.analyze(graph);
     if (lifetimes.empty()) {
         MI_LOG_WARNING("[MemoryPlanner] No tensors found for memory planning");
@@ -200,7 +200,7 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
 
     MI_LOG_INFO("[MemoryPlanner] Analyzed " + std::to_string(lifetimes.size()) + " tensors");
 
-    // 计算原始内存占用
+    // Step 2: Calculate original memory usage
     size_t original_memory = 0;
     for (const auto& lt : lifetimes) {
         if (!lt.is_persistent) {
@@ -208,20 +208,20 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
         }
     }
 
-    // Step 2: 构建冲突图
+    // Step 2: Build interference graph
     auto interference_graph = build_interference_graph(lifetimes);
     MI_LOG_INFO("[MemoryPlanner] Built interference graph with " +
                 std::to_string(interference_graph.nodes().size()) + " nodes");
 
-    // Step 3: 贪心着色算法分配内存池
+    // Step 3: Greedy coloring algorithm to allocate memory pools
     plan = allocate_offsets(lifetimes);
-    // 恢复原始内存统计，避免被新 plan 覆盖
+    // Restore original memory statistics to avoid being overwritten by new plan
     plan.original_memory = original_memory;
 
-    // Step 4: 计算统计信息
+    // Step 4: Calculate statistics
     plan.compute_statistics();
 
-    // Step 5: 打印结果
+    // Step 5: Print plan
     if (verbose_) {
         print_plan(plan);
     }
@@ -241,14 +241,14 @@ InterferenceGraph MemoryPlanner::build_interference_graph(
     const std::vector<TensorLifetime>& lifetimes) {
     InterferenceGraph graph;
 
-    // 添加所有非持久化Tensor作为节点
+    // Add all non-persistent tensors as nodes
     for (const auto& lt : lifetimes) {
         if (!lt.is_persistent) {
             graph.add_node(lt.name);
         }
     }
 
-    // 添加边：生命周期重叠的Tensor之间有边
+    // Add edges: Tensors with overlapping lifetimes have edges
     for (size_t i = 0; i < lifetimes.size(); ++i) {
         if (lifetimes[i].is_persistent)
             continue;
@@ -267,7 +267,7 @@ InterferenceGraph MemoryPlanner::build_interference_graph(
 }
 
 bool MemoryPlanner::lifetimes_overlap(const TensorLifetime& a, const TensorLifetime& b) const {
-    // 两个区间重叠的条件：NOT (a在b之前结束 OR b在a之前结束)
+    // Two intervals overlap if and only if: NOT (a ends before b starts OR b ends before a starts)
     return !(a.death_time < b.birth_time || b.death_time < a.birth_time);
 }
 
@@ -275,7 +275,7 @@ MemoryPlan MemoryPlanner::greedy_coloring(const InterferenceGraph& graph,
                                           std::vector<TensorLifetime>& lifetimes) {
     MemoryPlan plan;
 
-    // 按大小降序排序（大的Tensor优先分配，减少碎片）
+    // Sort non-persistent tensors by size in descending order (larger tensors first to reduce fragmentation)
     std::vector<TensorLifetime*> sorted_lifetimes;
     for (auto& lt : lifetimes) {
         if (!lt.is_persistent) {
@@ -288,21 +288,21 @@ MemoryPlan MemoryPlanner::greedy_coloring(const InterferenceGraph& graph,
                   return a->size_bytes > b->size_bytes;
               });
 
-    // 贪心着色
+    // Greedy coloring
     for (auto* tensor : sorted_lifetimes) {
-        // 找到第一个可用的内存池
+        // Find the first available memory pool
         int pool_id = find_available_pool(*tensor, graph, plan);
 
         if (pool_id == -1) {
-            // 需要新的内存池
+            // Need a new memory pool
             pool_id = static_cast<int>(plan.pools.size());
             size_t aligned_size = align_size(tensor->size_bytes);
             plan.pools.push_back(MemoryPool(pool_id, aligned_size));
             plan.pools.back().tensors.push_back(tensor->name);
         } else {
-            // 使用现有内存池
+            // Use existing memory pool
             plan.pools[pool_id].tensors.push_back(tensor->name);
-            // 更新池大小为该池中最大Tensor的大小
+            // Update pool size to the maximum size of the tensor in the pool
             size_t aligned_size = align_size(tensor->size_bytes);
             plan.pools[pool_id].size_bytes = std::max(plan.pools[pool_id].size_bytes, aligned_size);
         }
@@ -319,7 +319,7 @@ int MemoryPlanner::find_available_pool(const TensorLifetime& tensor, const Inter
     for (size_t pool_id = 0; pool_id < plan.pools.size(); ++pool_id) {
         bool can_use = true;
 
-        // 检查该池中的所有Tensor是否与当前Tensor冲突
+        // Check if any tensor in the pool conflicts with the current tensor
         for (const auto& other_tensor : plan.pools[pool_id].tensors) {
             if (graph.has_edge(tensor.name, other_tensor)) {
                 can_use = false;
@@ -332,7 +332,7 @@ int MemoryPlanner::find_available_pool(const TensorLifetime& tensor, const Inter
         }
     }
 
-    return -1;  // 没有可用的池
+    return -1;  // No available pool
 }
 
 size_t MemoryPlanner::align_size(size_t size) const {

@@ -52,6 +52,36 @@ class Operator {
                                      std::vector<core::Shape>& output_shapes) = 0;
 
     /**
+     * @brief Infer output shapes and dtypes
+     * @param input_shapes The input shapes
+     * @param input_dtypes The input dtypes
+     * @param output_shapes The output shapes
+     * @param output_dtypes The output dtypes
+     * @return The status of the infer metadata
+     *
+     * Default behavior: infer shapes and propagate the first input dtype.
+     */
+    virtual core::Status infer_metadata(const std::vector<core::Shape>& input_shapes,
+                                        const std::vector<core::DataType>& input_dtypes,
+                                        std::vector<core::Shape>& output_shapes,
+                                        std::vector<core::DataType>& output_dtypes) {
+        auto status = infer_shape(input_shapes, output_shapes);
+        if (status != core::Status::SUCCESS) {
+            return status;
+        }
+
+        output_dtypes.clear();
+        if (output_shapes.empty()) {
+            return core::Status::SUCCESS;
+        }
+
+        const core::DataType inferred =
+            input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
+        output_dtypes.assign(output_shapes.size(), inferred);
+        return core::Status::SUCCESS;
+    }
+
+    /**
      * @brief Get the name of the operator
      * @return The name of the operator
      */

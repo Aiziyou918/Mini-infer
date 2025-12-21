@@ -193,8 +193,10 @@ core::Status InferencePlan::infer_shapes() {
         }
 
         std::vector<core::Shape> input_shapes;
+        std::vector<core::DataType> input_dtypes;
         const auto& input_edges = node->inputs();
         size_t graph_input_count = 0;
+
         if (!input_edges.empty()) {
             int max_dst_port = -1;
             for (const auto& edge : input_edges) {
@@ -202,6 +204,7 @@ core::Status InferencePlan::infer_shapes() {
             }
             graph_input_count = static_cast<size_t>(max_dst_port + 1);
             input_shapes.resize(graph_input_count);
+            input_dtypes.resize(graph_input_count, core::DataType::FLOAT32);
         }
 
         for (const auto& edge : input_edges) {
@@ -218,36 +221,41 @@ core::Status InferencePlan::infer_shapes() {
                 continue;
             }
             input_shapes[dst_index] = outputs[src_index]->shape();
+            input_dtypes[dst_index] = outputs[src_index]->dtype();
         }
 
         const auto& imported_inputs = node->input_tensors();
         for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
             if (imported_inputs[i]) {
                 input_shapes.push_back(imported_inputs[i]->shape());
+                input_dtypes.push_back(imported_inputs[i]->dtype());
             }
         }
 
         if (graph_input_count == 0 && !imported_inputs.empty()) {
             input_shapes.clear();
+            input_dtypes.clear();
             for (const auto& tensor : imported_inputs) {
                 if (tensor) {
                     input_shapes.push_back(tensor->shape());
+                    input_dtypes.push_back(tensor->dtype());
                 }
             }
         }
 
-        if (input_shapes.empty()) {
-            MI_LOG_ERROR("[InferencePlan] Node " + node->name() +
-                         " has no input shapes, cannot infer output shape");
-            return core::Status::ERROR_RUNTIME;
-        }
-
         std::vector<core::Shape> output_shapes;
-        auto status = node->get_operator()->infer_shape(input_shapes, output_shapes);
+        std::vector<core::DataType> output_dtypes;
+        auto status = node->get_operator()->infer_metadata(input_shapes, input_dtypes,
+                                                           output_shapes, output_dtypes);
         if (status != core::Status::SUCCESS) {
             MI_LOG_ERROR("[InferencePlan] Failed to infer shape for node: " + node->name() +
                          " (status=" + std::to_string(static_cast<int>(status)) + ")");
             return status;
+        }
+        if (output_dtypes.size() != output_shapes.size()) {
+            const core::DataType fallback =
+                input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
+            output_dtypes.assign(output_shapes.size(), fallback);
         }
 
         if (output_shapes.empty()) {
@@ -265,10 +273,8 @@ core::Status InferencePlan::infer_shapes() {
                 output_tensors[i] = std::make_shared<core::Tensor>();
             }
             output_tensors[i]->set_shape_metadata(output_shapes[i]);
-
-            if (output_tensors[i]->dtype() == core::DataType::FLOAT32 &&
-                !node->input_tensors().empty() && node->input_tensors()[0]) {
-                output_tensors[i]->set_dtype(node->input_tensors()[0]->dtype());
+            if (i < output_dtypes.size()) {
+                output_tensors[i]->set_dtype(output_dtypes[i]);
             }
 
             total_inferred++;
@@ -302,28 +308,39 @@ core::Status InferencePlan::infer_shapes_with_profile() {
         }
     }
 
-    for (const auto& input_name : graph_->inputs()) {
-        auto it = opt_shapes.find(input_name);
+    for (const auto& binding : input_bindings_) {
+        auto it = opt_shapes.find(binding.name);
         if (it == opt_shapes.end()) {
-            MI_LOG_WARNING("[InferencePlan] No optimal shape for input '" + input_name + "'");
+            MI_LOG_WARNING("[InferencePlan] No optimal shape for input '" + binding.name + "'");
+            continue;
+        }
+        auto* node = binding.node;
+        if (!node) {
+            MI_LOG_WARNING("[InferencePlan] Input node missing for '" + binding.name + "'");
             continue;
         }
 
-        auto node = graph_->get_node(input_name);
-        if (node) {
-            if (node->output_tensors().empty() || !node->output_tensors()[0]) {
-                auto tensor = std::make_shared<core::Tensor>(it->second, core::DataType::FLOAT32);
-                node->set_output_tensors({tensor});
-            } else {
-                auto tensor =
-                    std::make_shared<core::Tensor>(it->second, node->output_tensors()[0]->dtype());
-                node->set_output_tensors({tensor});
-            }
+        auto& outputs = node->output_tensors();
+        if (outputs.empty()) {
+            outputs.resize(1);
+        }
+        if (!outputs[0]) {
+            outputs[0] = std::make_shared<core::Tensor>();
+        }
 
-            if (config_.enable_profiling) {
-                MI_LOG_INFO("[InferencePlan] Set input '" + input_name +
-                            "' shape: " + it->second.to_string());
+        core::DataType dtype = outputs[0]->dtype();
+        if (config_.optimization_profile) {
+            core::DataType profile_dtype;
+            if (config_.optimization_profile->get_input_dtype(binding.name, profile_dtype)) {
+                dtype = profile_dtype;
             }
+        }
+        outputs[0]->set_dtype(dtype);
+        outputs[0]->set_shape_metadata(it->second);
+
+        if (config_.enable_profiling) {
+            MI_LOG_INFO("[InferencePlan] Set input '" + binding.name +
+                        "' shape: " + it->second.to_string());
         }
     }
 
@@ -387,32 +404,6 @@ core::Status InferencePlan::update_tensor_properties() {
                                    std::to_string(idx) +
                                    "] had dynamic dimensions; defaulting to batch=1 shape " +
                                    tensor->shape().to_string());
-                }
-            }
-
-            auto inherit_dtype_from_tensor =
-                [&tensor](const std::shared_ptr<core::Tensor>& src) -> bool {
-                if (!src)
-                    return false;
-                tensor->set_dtype(src->dtype());
-                return true;
-            };
-
-            if (tensor->dtype() == core::DataType::FLOAT32) {
-                bool dtype_set = false;
-                for (const auto& edge : node->inputs()) {
-                    if (edge.node && !edge.node->output_tensors().empty()) {
-                        dtype_set = inherit_dtype_from_tensor(edge.node->output_tensors()[0]);
-                        if (dtype_set)
-                            break;
-                    }
-                }
-                if (!dtype_set) {
-                    for (const auto& imported : node->input_tensors()) {
-                        if (inherit_dtype_from_tensor(imported)) {
-                            break;
-                        }
-                    }
                 }
             }
 

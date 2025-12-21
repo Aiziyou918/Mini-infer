@@ -101,6 +101,20 @@ core::Status OptimizationProfile::set_shape_range(
     return core::Status::SUCCESS;
 }
 
+void OptimizationProfile::set_input_dtype(const std::string& input_name, core::DataType dtype) {
+    input_dtypes_[input_name] = dtype;
+}
+
+bool OptimizationProfile::get_input_dtype(const std::string& input_name,
+                                          core::DataType& dtype) const {
+    auto it = input_dtypes_.find(input_name);
+    if (it == input_dtypes_.end()) {
+        return false;
+    }
+    dtype = it->second;
+    return true;
+}
+
 const ShapeRange* OptimizationProfile::get_shape_range(const std::string& input_name) const {
     auto it = shape_ranges_.find(input_name);
     if (it == shape_ranges_.end()) {
@@ -166,7 +180,12 @@ std::string OptimizationProfile::to_string() const {
     ss << "OptimizationProfile{" << std::endl;
     
     for (const auto& [name, range] : shape_ranges_) {
-        ss << "  " << name << ": " << range.to_string() << std::endl;
+        ss << "  " << name << ": " << range.to_string();
+        auto dtype_it = input_dtypes_.find(name);
+        if (dtype_it != input_dtypes_.end()) {
+            ss << ", dtype=" << static_cast<int>(dtype_it->second);
+        }
+        ss << std::endl;
     }
     
     ss << "}";

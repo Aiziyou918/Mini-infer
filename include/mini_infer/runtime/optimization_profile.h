@@ -118,6 +118,23 @@ public:
         const core::Shape& opt,
         const core::Shape& max
     );
+
+    /**
+     * @brief Set input dtype for an input tensor
+     *
+     * @param input_name Name of the input tensor
+     * @param dtype Input data type
+     */
+    void set_input_dtype(const std::string& input_name, core::DataType dtype);
+
+    /**
+     * @brief Get input dtype for an input tensor
+     *
+     * @param input_name Name of the input tensor
+     * @param dtype Output dtype
+     * @return true if dtype exists
+     */
+    bool get_input_dtype(const std::string& input_name, core::DataType& dtype) const;
     
     /**
      * @brief Get shape range for an input tensor
@@ -185,6 +202,7 @@ public:
 private:
     // Map of input name to shape range
     std::map<std::string, ShapeRange> shape_ranges_;
+    std::map<std::string, core::DataType> input_dtypes_;
 };
 
 } // namespace runtime
