@@ -9,8 +9,10 @@
  * - Accuracy validation
  */
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
