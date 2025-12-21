@@ -10,37 +10,7 @@
 namespace mini_infer {
 namespace runtime {
 
-// ============================================================================
-// InterferenceGraph Implementation
-// ============================================================================
 
-void InterferenceGraph::add_node(const std::string& tensor_name) {
-    nodes_.insert(tensor_name);
-    if (adjacency_list_.find(tensor_name) == adjacency_list_.end()) {
-        adjacency_list_[tensor_name] = std::unordered_set<std::string>();
-    }
-}
-
-void InterferenceGraph::add_edge(const std::string& tensor1, const std::string& tensor2) {
-    adjacency_list_[tensor1].insert(tensor2);
-    adjacency_list_[tensor2].insert(tensor1);
-}
-
-bool InterferenceGraph::has_edge(const std::string& tensor1, const std::string& tensor2) const {
-    auto it = adjacency_list_.find(tensor1);
-    if (it == adjacency_list_.end()) {
-        return false;
-    }
-    return it->second.count(tensor2) > 0;
-}
-
-std::vector<std::string> InterferenceGraph::get_neighbors(const std::string& tensor_name) const {
-    auto it = adjacency_list_.find(tensor_name);
-    if (it == adjacency_list_.end()) {
-        return {};
-    }
-    return std::vector<std::string>(it->second.begin(), it->second.end());
-}
 
 // ============================================================================
 // LivenessAnalyzer Implementation
@@ -208,14 +178,8 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
         }
     }
 
-    // Step 2: Build interference graph
-    auto interference_graph = build_interference_graph(lifetimes);
-    MI_LOG_INFO("[MemoryPlanner] Built interference graph with " +
-                std::to_string(interference_graph.nodes().size()) + " nodes");
-
-    // Step 3: Greedy coloring algorithm to allocate memory pools
+    // Step 3: Allocate offsets using linear-scan algorithm
     plan = allocate_offsets(lifetimes);
-    // Restore original memory statistics to avoid being overwritten by new plan
     plan.original_memory = original_memory;
 
     // Step 4: Calculate statistics
@@ -237,103 +201,7 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
     return plan;
 }
 
-InterferenceGraph MemoryPlanner::build_interference_graph(
-    const std::vector<TensorLifetime>& lifetimes) {
-    InterferenceGraph graph;
 
-    // Add all non-persistent tensors as nodes
-    for (const auto& lt : lifetimes) {
-        if (!lt.is_persistent) {
-            graph.add_node(lt.name);
-        }
-    }
-
-    // Add edges: Tensors with overlapping lifetimes have edges
-    for (size_t i = 0; i < lifetimes.size(); ++i) {
-        if (lifetimes[i].is_persistent)
-            continue;
-
-        for (size_t j = i + 1; j < lifetimes.size(); ++j) {
-            if (lifetimes[j].is_persistent)
-                continue;
-
-            if (lifetimes_overlap(lifetimes[i], lifetimes[j])) {
-                graph.add_edge(lifetimes[i].name, lifetimes[j].name);
-            }
-        }
-    }
-
-    return graph;
-}
-
-bool MemoryPlanner::lifetimes_overlap(const TensorLifetime& a, const TensorLifetime& b) const {
-    // Two intervals overlap if and only if: NOT (a ends before b starts OR b ends before a starts)
-    return !(a.death_time < b.birth_time || b.death_time < a.birth_time);
-}
-
-MemoryPlan MemoryPlanner::greedy_coloring(const InterferenceGraph& graph,
-                                          std::vector<TensorLifetime>& lifetimes) {
-    MemoryPlan plan;
-
-    // Sort non-persistent tensors by size in descending order (larger tensors first to reduce fragmentation)
-    std::vector<TensorLifetime*> sorted_lifetimes;
-    for (auto& lt : lifetimes) {
-        if (!lt.is_persistent) {
-            sorted_lifetimes.push_back(&lt);
-        }
-    }
-
-    std::sort(sorted_lifetimes.begin(), sorted_lifetimes.end(),
-              [](const TensorLifetime* a, const TensorLifetime* b) {
-                  return a->size_bytes > b->size_bytes;
-              });
-
-    // Greedy coloring
-    for (auto* tensor : sorted_lifetimes) {
-        // Find the first available memory pool
-        int pool_id = find_available_pool(*tensor, graph, plan);
-
-        if (pool_id == -1) {
-            // Need a new memory pool
-            pool_id = static_cast<int>(plan.pools.size());
-            size_t aligned_size = align_size(tensor->size_bytes);
-            plan.pools.push_back(MemoryPool(pool_id, aligned_size));
-            plan.pools.back().tensors.push_back(tensor->name);
-        } else {
-            // Use existing memory pool
-            plan.pools[pool_id].tensors.push_back(tensor->name);
-            // Update pool size to the maximum size of the tensor in the pool
-            size_t aligned_size = align_size(tensor->size_bytes);
-            plan.pools[pool_id].size_bytes = std::max(plan.pools[pool_id].size_bytes, aligned_size);
-        }
-
-        plan.tensor_to_pool[tensor->name] = pool_id;
-        tensor->pool_id = pool_id;
-    }
-
-    return plan;
-}
-
-int MemoryPlanner::find_available_pool(const TensorLifetime& tensor, const InterferenceGraph& graph,
-                                       const MemoryPlan& plan) const {
-    for (size_t pool_id = 0; pool_id < plan.pools.size(); ++pool_id) {
-        bool can_use = true;
-
-        // Check if any tensor in the pool conflicts with the current tensor
-        for (const auto& other_tensor : plan.pools[pool_id].tensors) {
-            if (graph.has_edge(tensor.name, other_tensor)) {
-                can_use = false;
-                break;
-            }
-        }
-
-        if (can_use) {
-            return static_cast<int>(pool_id);
-        }
-    }
-
-    return -1;  // No available pool
-}
 
 size_t MemoryPlanner::align_size(size_t size) const {
     if (alignment_ == 0) {
@@ -468,15 +336,15 @@ void MemoryPlanner::print_plan(const MemoryPlan& plan) const {
     oss << "╚════════════════════════════════════════════════════════════════════╝\n";
     oss << "\n";
 
-    oss << "Memory Pools: " << plan.pools.size() << "\n";
+    oss << "Shared Buffer Size: " << std::fixed << std::setprecision(2)
+        << (plan.shared_buffer_size / 1024.0) << " KB\n";
+    oss << "Tensors Allocated: " << plan.tensor_offsets.size() << "\n";
     oss << "----------------------------------------\n";
 
-    for (const auto& pool : plan.pools) {
-        oss << "Pool " << pool.pool_id << ": " << std::fixed << std::setprecision(2)
-            << (pool.size_bytes / 1024.0) << " KB\n";
-        oss << "  Tensors (" << pool.tensors.size() << "):\n";
-        for (const auto& tensor : pool.tensors) {
-            oss << "    - " << tensor << "\n";
+    if (plan.pools.size() == 1 && !plan.pools[0].tensors.empty()) {
+        oss << "Tensor Offsets:\n";
+        for (const auto& [name, offset] : plan.tensor_offsets) {
+            oss << "  " << name << ": offset=" << offset << " bytes\n";
         }
         oss << "\n";
     }

@@ -79,45 +79,7 @@ struct MemoryPlan {
     }
 };
 
-/**
- * @brief Interference graph
- *
- * Used to represent the lifetime conflict relationship between Tensors
- * If two Tensors have overlapping lifetimes, they have an edge between them
- */
-class InterferenceGraph {
-   public:
-    /**
-     * @brief Add node (Tensor)
-     */
-    void add_node(const std::string& tensor_name);
 
-    /**
-     * @brief Add edge (conflict relationship)
-     */
-    void add_edge(const std::string& tensor1, const std::string& tensor2);
-
-    /**
-     * @brief Check if two Tensors conflict
-     */
-    bool has_edge(const std::string& tensor1, const std::string& tensor2) const;
-
-    /**
-     * @brief Get all Tensors that conflict with the specified Tensor
-     */
-    std::vector<std::string> get_neighbors(const std::string& tensor_name) const;
-
-    /**
-     * @brief Get all nodes
-     */
-    const std::unordered_set<std::string>& nodes() const {
-        return nodes_;
-    }
-
-   private:
-    std::unordered_set<std::string> nodes_;
-    std::unordered_map<std::string, std::unordered_set<std::string>> adjacency_list_;
-};
 
 /**
  * @brief Liveness analyzer
@@ -156,13 +118,13 @@ class LivenessAnalyzer {
 /**
  * @brief Static memory planner (TensorRT style)
  *
- * Use greedy coloring algorithm to allocate memory, let Tensor with non-overlapping lifetimes reuse the same memory block
+ * Uses linear-scan algorithm to allocate memory offsets in a single shared buffer.
+ * Tensors with non-overlapping lifetimes reuse the same memory regions.
  *
  * Algorithm flow:
- * 1. Lifetime analysis: Determine the lifetime of each Tensor
- * 2. Build conflict graph: Tensor with overlapping lifetimes have edges between them
- * 3. Graph coloring: Use the minimum number of colors to color the nodes, adjacent nodes have different colors
- * 4. Memory allocation: Each color corresponds to a memory pool
+ * 1. Lifetime analysis: Determine birth/death time of each tensor
+ * 2. Linear scan: Allocate offsets by reusing freed memory blocks
+ * 3. Result: Single contiguous buffer with optimal memory reuse
  */
 class MemoryPlanner {
    public:
@@ -200,33 +162,9 @@ class MemoryPlanner {
 
    private:
     /**
-     * @brief Build conflict graph
-     */
-    InterferenceGraph build_interference_graph(const std::vector<TensorLifetime>& lifetimes);
-
-    /**
-     * @brief Check if two lifetimes overlap
-     */
-    bool lifetimes_overlap(const TensorLifetime& a, const TensorLifetime& b) const;
-
-    /**
-     * @brief Use greedy coloring algorithm to allocate memory pools
-     */
-    MemoryPlan greedy_coloring(const InterferenceGraph& graph,
-                               std::vector<TensorLifetime>& lifetimes);
-
-    /**
-     * @brief Allocate offsets in a shared buffer (linear-scan)
+     * @brief Allocate offsets in a shared buffer using linear-scan algorithm
      */
     MemoryPlan allocate_offsets(std::vector<TensorLifetime>& lifetimes);
-
-    /**
-     * @brief Find available memory pool for Tensor
-     *
-     * @return Pool ID, -1 means new pool is needed
-     */
-    int find_available_pool(const TensorLifetime& tensor, const InterferenceGraph& graph,
-                            const MemoryPlan& plan) const;
 
     /**
      * @brief Align memory size
