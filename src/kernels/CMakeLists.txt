@@ -9,6 +9,7 @@ set(KERNEL_SOURCES
     cpu/pooling_cpu.cpp
     cpu/relu_cpu.cpp
     cpu/flatten_cpu.cpp
+    cpu/linear_cpu.cpp
     cpu/reshape_cpu.cpp
     cpu/softmax_cpu.cpp
 )

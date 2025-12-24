@@ -284,6 +284,14 @@ core::Status InferencePlan::infer_shapes() {
                             std::to_string(i) + "] shape: " + output_shapes[i].to_string());
             }
         }
+
+        if (!input_dtypes.empty()) {
+            auto kernel = kernels::KernelRegistry::instance().find(
+                node->type(), config_.device_type, input_dtypes[0]);
+            if (kernel) {
+                node->get_operator()->set_cached_kernel(kernel);
+            }
+        }
     }
 
     MI_LOG_INFO("[InferencePlan] Shape inference completed: " + std::to_string(total_inferred) +

@@ -24,8 +24,15 @@ core::Status Softmax::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.op_param = &param_;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kSOFTMAX,
-                                                           inputs[0]->device(), inputs[0]->dtype());
+    auto kernel = cached_kernel();
+    if (!kernel) {
+        kernel = kernels::KernelRegistry::instance().find(core::OpType::kSOFTMAX,
+                                                          inputs[0]->device(),
+                                                          inputs[0]->dtype());
+        if (kernel) {
+            set_cached_kernel(kernel);
+        }
+    }
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

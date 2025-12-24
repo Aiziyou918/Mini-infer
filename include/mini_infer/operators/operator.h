@@ -8,6 +8,7 @@
 #include "mini_infer/core/op_type.h"
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/core/types.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 
 namespace mini_infer {
@@ -81,6 +82,14 @@ class Operator {
         return core::Status::SUCCESS;
     }
 
+    void set_cached_kernel(kernels::KernelFunc func) {
+        cached_kernel_ = std::move(func);
+    }
+
+    kernels::KernelFunc cached_kernel() const {
+        return cached_kernel_;
+    }
+
     /**
      * @brief Get the name of the operator
      * @return The name of the operator
@@ -109,6 +118,7 @@ class Operator {
     std::string name_;                //< The name of the operator
     core::OpType op_type_;            //< The OpType of the operator (cached for fast access)
     std::shared_ptr<OpParam> param_;  //< The parameter of the operator
+    kernels::KernelFunc cached_kernel_;
 };
 
 /**

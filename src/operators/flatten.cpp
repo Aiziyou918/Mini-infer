@@ -32,8 +32,14 @@ core::Status Flatten::forward(const std::vector<std::shared_ptr<core::Tensor>>& 
     ctx.outputs = &outputs;
     ctx.device_context = kernels::get_current_device_context();
 
-    auto kernel = kernels::KernelRegistry::instance().find(core::OpType::kFLATTEN, input->device(),
-                                                           input->dtype());
+    auto kernel = cached_kernel();
+    if (!kernel) {
+        kernel = kernels::KernelRegistry::instance().find(core::OpType::kFLATTEN, input->device(),
+                                                          input->dtype());
+        if (kernel) {
+            set_cached_kernel(kernel);
+        }
+    }
     if (!kernel) {
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }

@@ -1,11 +1,7 @@
 #include "mini_infer/operators/linear.h"
 
-#include <algorithm>
-#include <cstring>
-
 #include "mini_infer/core/op_type.h"
-#include "mini_infer/kernels/bias.h"
-#include "mini_infer/kernels/gemm.h"
+#include "mini_infer/kernels/kernel_registry.h"
 
 namespace mini_infer {
 namespace operators {
@@ -46,10 +42,6 @@ core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
     }
 
     // Calculate dimensions
-    int batch_size = 1;
-    for (size_t i = 0; i < input_shape.ndim() - 1; ++i) {
-        batch_size *= static_cast<int>(input_shape[i]);
-    }
     int in_features = static_cast<int>(input_shape[input_shape.ndim() - 1]);
     int weight_in_features = static_cast<int>(weight_shape[1]);
 
@@ -79,54 +71,25 @@ core::Status Linear::forward(const std::vector<std::shared_ptr<core::Tensor>>& i
         param_.out_features = out_features;
     }
 
-    // Perform computation based on data type
-    const auto dtype = input->dtype();
+    kernels::KernelContext ctx;
+    ctx.inputs = &inputs;
+    ctx.outputs = &outputs;
+    ctx.op_param = &param_;
+    ctx.device_context = kernels::get_current_device_context();
 
-    if (dtype == core::DataType::FLOAT32) {
-        const float* input_data = static_cast<const float*>(input->data());
-        const float* weight_data = static_cast<const float*>(weight->data());
-        float* output_data = static_cast<float*>(output->data());
-
-        // Matrix multiplication: output = input @ weight^T
-        kernels::GEMMKernel::gemm_nt<float>(input_data,   // [batch_size, in_features]
-                                            weight_data,  // [out_features, in_features]
-                                            output_data,  // [batch_size, out_features]
-                                            batch_size, out_features, in_features);
-
-        // Add bias if needed
-        if (param_.use_bias) {
-            const float* bias_data = static_cast<const float*>(inputs[2]->data());
-            kernels::BiasKernel::add_channel_bias<float>(output_data, bias_data,
-                                                         batch_size,    // batch_size
-                                                         out_features,  // channels
-                                                         1  // spatial_size (1 for Linear)
-            );
+    auto kernel = cached_kernel();
+    if (!kernel) {
+        kernel = kernels::KernelRegistry::instance().find(core::OpType::kGEMM,
+                                                          input->device(), input->dtype());
+        if (kernel) {
+            set_cached_kernel(kernel);
         }
-
-    } else if (dtype == core::DataType::INT32) {
-        const int32_t* input_data = static_cast<const int32_t*>(input->data());
-        const int32_t* weight_data = static_cast<const int32_t*>(weight->data());
-        int32_t* output_data = static_cast<int32_t*>(output->data());
-
-        // Matrix multiplication: output = input @ weight^T
-        kernels::GEMMKernel::gemm_nt<int32_t>(input_data,   // [batch_size, in_features]
-                                              weight_data,  // [out_features, in_features]
-                                              output_data,  // [batch_size, out_features]
-                                              batch_size, out_features, in_features);
-
-        // Add bias if needed
-        if (param_.use_bias) {
-            const int32_t* bias_data = static_cast<const int32_t*>(inputs[2]->data());
-            kernels::BiasKernel::add_channel_bias<int32_t>(output_data, bias_data,
-                                                           batch_size,    // batch_size
-                                                           out_features,  // channels
-                                                           1  // spatial_size (1 for Linear)
-            );
-        }
-
-    } else {
-        return core::Status::ERROR_INVALID_ARGUMENT;
     }
+    if (!kernel) {
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
+
+    kernel(&ctx);
 
     return core::Status::SUCCESS;
 }
