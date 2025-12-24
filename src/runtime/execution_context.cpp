@@ -109,7 +109,7 @@ core::Status ExecutionContext::prepare_memory_pools(bool use_memory_pools) {
     }
 
     const auto& plan = plan_->get_memory_plan();
-    if (!plan.tensor_offsets.empty() && plan.shared_buffer_size > 0) {
+    if (plan.shared_buffer_size > 0) {
         shared_buffer_size_ = plan.shared_buffer_size;
         void* raw = core::CPUAllocator::get_instance()->allocate(
             shared_buffer_size_, plan_->config().memory_alignment);
@@ -218,7 +218,7 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
         tensor->set_dtype(tmpl->dtype());
 
         const auto bind_result =
-            try_bind_tensor_to_pool(node->name(), i, tensor, use_memory_pools, allocated_count,
+            try_bind_tensor_to_pool(node->id(), i, tensor, use_memory_pools, allocated_count,
                                     failed_count);
         if (bind_result == PoolBindResult::kBound) {
             continue;
@@ -247,26 +247,26 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
 }
 
 ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
-    const std::string& tensor_name, size_t output_index, std::shared_ptr<core::Tensor>& tensor,
+    size_t node_id, size_t output_index, std::shared_ptr<core::Tensor>& tensor,
     bool use_memory_pools, int& allocated_count, int& failed_count) {
     if (!use_memory_pools) {
         return PoolBindResult::kNotTried;
     }
 
     const auto& plan = plan_->get_memory_plan();
-    const auto offset_it = plan.tensor_offsets.find(tensor_name);
-    if (offset_it != plan.tensor_offsets.end()) {
+    if (node_id < plan.tensor_offsets.size() &&
+        plan.tensor_offsets[node_id] != MemoryPlan::kInvalidOffset) {
         if (!shared_buffer_) {
-            MI_LOG_ERROR("[ExecutionContext] Shared buffer not initialized for tensor " +
-                         tensor_name);
+            MI_LOG_ERROR("[ExecutionContext] Shared buffer not initialized for node " +
+                         std::to_string(node_id));
             failed_count++;
             return PoolBindResult::kFailed;
         }
 
         const size_t required = tensor->size_in_bytes();
-        const size_t offset = offset_it->second;
+        const size_t offset = plan.tensor_offsets[node_id];
         if (offset + required > shared_buffer_size_) {
-            MI_LOG_ERROR("[ExecutionContext] Tensor " + tensor_name + " output[" +
+            MI_LOG_ERROR("[ExecutionContext] Node " + std::to_string(node_id) + " output[" +
                          std::to_string(output_index) + "] requires " +
                          std::to_string(required) + " bytes at offset " +
                          std::to_string(offset) + ", exceeds shared buffer size " +
@@ -276,15 +276,16 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
         }
 
         if (!tensor->bind_external_data_with_offset(shared_buffer_, shared_buffer_size_, offset)) {
-            MI_LOG_ERROR("[ExecutionContext] Failed to bind shared buffer for tensor " +
-                         tensor_name);
+            MI_LOG_ERROR("[ExecutionContext] Failed to bind shared buffer for node " +
+                         std::to_string(node_id));
             failed_count++;
             return PoolBindResult::kFailed;
         }
 
         allocated_count++;
         if (plan_->config().enable_profiling) {
-            MI_LOG_INFO("[ExecutionContext] Bound tensor for " + tensor_name + " output[" +
+            MI_LOG_INFO("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
+                        " output[" +
                         std::to_string(output_index) + "] to shared buffer offset " +
                         std::to_string(offset) + " (" + std::to_string(required / 1024.0) +
                         " KB)");
@@ -292,19 +293,19 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
         return PoolBindResult::kBound;
     }
 
-    const auto plan_it = plan.tensor_to_pool.find(tensor_name);
-    if (plan_it == plan.tensor_to_pool.end()) {
+    if (node_id >= plan.tensor_to_pool.size() ||
+        plan.tensor_to_pool[node_id] == MemoryPlan::kInvalidPool) {
         return PoolBindResult::kNotTried;
     }
 
-    int pool_id = plan_it->second;
+    int pool_id = plan.tensor_to_pool[node_id];
     const bool valid_pool =
         pool_id >= 0 && static_cast<size_t>(pool_id) < memory_pool_buffers_.size() &&
         static_cast<size_t>(pool_id) < plan.pools.size() && memory_pool_buffers_[pool_id] != nullptr;
 
     if (!valid_pool) {
-        MI_LOG_WARNING("[ExecutionContext] Memory plan pool unavailable for tensor " + tensor_name +
-                       ", falling back to independent allocation");
+        MI_LOG_WARNING("[ExecutionContext] Memory plan pool unavailable for node " +
+                       std::to_string(node_id) + ", falling back to independent allocation");
         return PoolBindResult::kNotTried;
     }
 
@@ -312,7 +313,7 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
     const size_t pool_size = plan.pools[static_cast<size_t>(pool_id)].size_bytes;
 
     if (required > pool_size) {
-        MI_LOG_ERROR("[ExecutionContext] Tensor " + tensor_name + " output[" +
+        MI_LOG_ERROR("[ExecutionContext] Node " + std::to_string(node_id) + " output[" +
                      std::to_string(output_index) + "] requires " +
                      std::to_string(required) + " bytes, but pool " +
                      std::to_string(pool_id) + " size is " + std::to_string(pool_size));
@@ -325,7 +326,8 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
     allocated_count++;
 
     if (plan_->config().enable_profiling) {
-        MI_LOG_INFO("[ExecutionContext] Bound tensor for " + tensor_name + " output[" +
+        MI_LOG_INFO("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
+                    " output[" +
                     std::to_string(output_index) + "] to pool " + std::to_string(pool_id) + " (" +
                     std::to_string(required / 1024.0) + " KB, pool size " +
                     std::to_string(pool_size / 1024.0) + " KB)");

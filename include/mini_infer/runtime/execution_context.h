@@ -56,7 +56,7 @@ class ExecutionContext {
 
     enum class PoolBindResult { kNotTried, kBound, kFailed };
 
-    PoolBindResult try_bind_tensor_to_pool(const std::string& tensor_name, size_t output_index,
+    PoolBindResult try_bind_tensor_to_pool(size_t node_id, size_t output_index,
                                            std::shared_ptr<core::Tensor>& tensor,
                                            bool use_memory_pools, int& allocated_count,
                                            int& failed_count);

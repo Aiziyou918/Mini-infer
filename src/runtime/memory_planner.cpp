@@ -76,6 +76,7 @@ std::vector<TensorLifetime> LivenessAnalyzer::analyze(graph::Graph* graph) {
         lifetime.size_bytes = 0;
         auto node = graph->get_node(tensor_name);
         if (node && !node->output_tensors().empty() && node->output_tensors()[0]) {
+            lifetime.node_id = node->id();
             auto t = node->output_tensors()[0];
             const auto numel = t->shape().numel();
             // Fallback to 1024 bytes if size_in_bytes is not available
@@ -179,7 +180,7 @@ MemoryPlan MemoryPlanner::plan(graph::Graph* graph) {
     }
 
     // Step 3: Allocate offsets using linear-scan algorithm
-    plan = allocate_offsets(lifetimes);
+    plan = allocate_offsets(lifetimes, graph->node_capacity());
     plan.original_memory = original_memory;
 
     // Step 4: Calculate statistics
@@ -217,8 +218,11 @@ size_t MemoryPlanner::align_offset(size_t offset) const {
     return ((offset + alignment_ - 1) / alignment_) * alignment_;
 }
 
-MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetimes) {
+MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetimes,
+                                           size_t node_capacity) {
     MemoryPlan plan;
+    plan.tensor_offsets.assign(node_capacity, MemoryPlan::kInvalidOffset);
+    plan.tensor_to_pool.assign(node_capacity, MemoryPlan::kInvalidPool);
 
     struct LiveAlloc {
         std::string name;
@@ -274,6 +278,10 @@ MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetime
     };
 
     for (auto* tensor : sorted_lifetimes) {
+        if (tensor->node_id == TensorLifetime::kInvalidNodeId ||
+            tensor->node_id >= node_capacity) {
+            continue;
+        }
         const size_t aligned_size = align_size(tensor->size_bytes);
 
         // Expire allocations whose lifetime ended before this tensor starts.
@@ -308,8 +316,8 @@ MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetime
             buffer_size = offset + aligned_size;
         }
 
-        plan.tensor_offsets[tensor->name] = offset;
-        plan.tensor_to_pool[tensor->name] = 0;
+        plan.tensor_offsets[tensor->node_id] = offset;
+        plan.tensor_to_pool[tensor->node_id] = 0;
         tensor->pool_id = 0;
 
         active.push_back(LiveAlloc{tensor->name, tensor->death_time, offset, aligned_size});
@@ -319,9 +327,6 @@ MemoryPlan MemoryPlanner::allocate_offsets(std::vector<TensorLifetime>& lifetime
     if (plan.shared_buffer_size > 0) {
         plan.pools.clear();
         plan.pools.push_back(MemoryPool(0, plan.shared_buffer_size));
-        for (const auto& [name, _] : plan.tensor_offsets) {
-            plan.pools[0].tensors.push_back(name);
-        }
     }
 
     return plan;
@@ -331,33 +336,28 @@ void MemoryPlanner::print_plan(const MemoryPlan& plan) const {
     std::ostringstream oss;
 
     oss << "\n";
-    oss << "╔════════════════════════════════════════════════════════════════════╗\n";
-    oss << "║              Static Memory Planning Result                         ║\n";
-    oss << "╚════════════════════════════════════════════════════════════════════╝\n";
-    oss << "\n";
-
-    oss << "Shared Buffer Size: " << std::fixed << std::setprecision(2)
+    oss << "Static Memory Planning Result\n";
+    oss << "------------------------------\n";
+    oss << "Shared Buffer:   " << std::fixed << std::setprecision(2)
         << (plan.shared_buffer_size / 1024.0) << " KB\n";
-    oss << "Tensors Allocated: " << plan.tensor_offsets.size() << "\n";
-    oss << "----------------------------------------\n";
 
-    if (plan.pools.size() == 1 && !plan.pools[0].tensors.empty()) {
-        oss << "Tensor Offsets:\n";
-        for (const auto& [name, offset] : plan.tensor_offsets) {
-            oss << "  " << name << ": offset=" << offset << " bytes\n";
+    size_t allocated = 0;
+    for (const auto offset : plan.tensor_offsets) {
+        if (offset != MemoryPlan::kInvalidOffset) {
+            allocated++;
         }
-        oss << "\n";
     }
-
-    oss << "----------------------------------------\n";
+    oss << "Tensors Allocated: " << allocated << "\n";
     oss << "Original Memory:  " << std::fixed << std::setprecision(2)
         << (plan.original_memory / 1024.0) << " KB\n";
-    oss << "Optimized Memory: " << (plan.total_memory / 1024.0) << " KB\n";
-    oss << "Memory Saving:    " << (plan.memory_saving_ratio * 100.0f) << "%\n";
-    oss << "╚════════════════════════════════════════════════════════════════════╝\n";
+    oss << "Optimized Memory: " << std::fixed << std::setprecision(2)
+        << (plan.total_memory / 1024.0) << " KB\n";
+    oss << "Memory Saving:    " << std::fixed << std::setprecision(2)
+        << (plan.memory_saving_ratio * 100.0f) << "%\n";
 
     MI_LOG_INFO(oss.str());
 }
+
 
 }  // namespace runtime
 }  // namespace mini_infer

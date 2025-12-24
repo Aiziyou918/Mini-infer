@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "mini_infer/graph/graph.h"
@@ -20,6 +20,7 @@ namespace runtime {
  */
 struct TensorLifetime {
     std::string name;    // Tensor name
+    size_t node_id;      // Node ID
     size_t size_bytes;   // Memory size (bytes)
     int birth_time;      // Birth time (topological order)
     int death_time;      // Death time (topological order)
@@ -27,7 +28,14 @@ struct TensorLifetime {
     bool is_persistent;  // Whether the tensor is persistent (weights, inputs, outputs, etc.)
 
     TensorLifetime()
-        : size_bytes(0), birth_time(-1), death_time(-1), pool_id(-1), is_persistent(false) {}
+        : node_id(kInvalidNodeId),
+          size_bytes(0),
+          birth_time(-1),
+          death_time(-1),
+          pool_id(-1),
+          is_persistent(false) {}
+
+    static constexpr size_t kInvalidNodeId = std::numeric_limits<size_t>::max();
 };
 
 /**
@@ -51,14 +59,17 @@ struct MemoryPool {
  */
 struct MemoryPlan {
     std::vector<MemoryPool> pools;                        // All memory pools
-    std::unordered_map<std::string, int> tensor_to_pool;  // Tensor -> Pool ID mapping
-    std::unordered_map<std::string, size_t> tensor_offsets;  // Tensor -> Offset mapping
+    std::vector<int> tensor_to_pool;                      // Node ID -> Pool ID mapping
+    std::vector<size_t> tensor_offsets;                   // Node ID -> Offset mapping
     size_t shared_buffer_size{0};                            // Shared buffer size in bytes
     size_t total_memory;                                  // Total memory usage
     size_t original_memory;                               // Original memory usage before optimization
     float memory_saving_ratio;                            // Memory saving ratio
 
     MemoryPlan() : total_memory(0), original_memory(0), memory_saving_ratio(0.0f) {}
+
+    static constexpr size_t kInvalidOffset = std::numeric_limits<size_t>::max();
+    static constexpr int kInvalidPool = -1;
 
     /**
      * @brief Compute statistics
@@ -164,7 +175,7 @@ class MemoryPlanner {
     /**
      * @brief Allocate offsets in a shared buffer using linear-scan algorithm
      */
-    MemoryPlan allocate_offsets(std::vector<TensorLifetime>& lifetimes);
+    MemoryPlan allocate_offsets(std::vector<TensorLifetime>& lifetimes, size_t node_capacity);
 
     /**
      * @brief Align memory size
