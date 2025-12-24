@@ -306,20 +306,20 @@ core::Status InferencePlan::infer_shapes_with_profile() {
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
 
-    // TensorRT-style: Use optimal shapes for build-time inference
-    auto opt_shapes = config_.optimization_profile->get_optimal_shapes();
+    // Use max shapes for build-time inference
+    auto max_shapes = config_.optimization_profile->get_max_shapes();
 
     if (config_.enable_profiling) {
-        MI_LOG_INFO("[InferencePlan] Using profile with optimal shapes:");
-        for (const auto& [name, shape] : opt_shapes) {
+        MI_LOG_INFO("[InferencePlan] Using profile with max shapes:");
+        for (const auto& [name, shape] : max_shapes) {
             MI_LOG_INFO("[InferencePlan]   " + name + ": " + shape.to_string());
         }
     }
 
     for (const auto& binding : input_bindings_) {
-        auto it = opt_shapes.find(binding.name);
-        if (it == opt_shapes.end()) {
-            MI_LOG_WARNING("[InferencePlan] No optimal shape for input '" + binding.name + "'");
+        auto it = max_shapes.find(binding.name);
+        if (it == max_shapes.end()) {
+            MI_LOG_WARNING("[InferencePlan] No max shape for input '" + binding.name + "'");
             continue;
         }
         auto* node = binding.node;
@@ -694,6 +694,9 @@ core::Status InferencePlan::handle_shape_change(
         if (!node) {
             continue;
         }
+        if (graph_ && graph_->is_input(node->name())) {
+            continue;
+        }
         auto inferred = ctx->shape_inference_engine_->get_inferred_shape(node->name());
         if (!inferred) {
             continue;
@@ -708,7 +711,29 @@ core::Status InferencePlan::handle_shape_change(
         }
 
         if (outputs[0]->shape() != *inferred) {
-            outputs[0]->resize(*inferred);
+            if (config_.enable_memory_planning) {
+                const size_t required =
+                    static_cast<size_t>(inferred->numel()) * outputs[0]->element_size();
+                size_t available = outputs[0]->capacity();
+                if (outputs[0]->storage_offset() >= available) {
+                    available = 0;
+                } else {
+                    available -= outputs[0]->storage_offset();
+                }
+
+                if (required > available) {
+                    MI_LOG_ERROR("[InferencePlan] Tensor '" + node->name() + "' output[0] " +
+                                 "shape " + inferred->to_string() +
+                                 " exceeds planned capacity " + std::to_string(available) +
+                                 " bytes");
+                    return core::Status::ERROR_RUNTIME;
+                }
+
+                outputs[0]->set_shape_metadata(*inferred);
+            } else {
+                outputs[0]->resize(*inferred);
+            }
+
             resized++;
 
             if (config_.enable_profiling) {

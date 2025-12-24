@@ -66,8 +66,7 @@ core::Status ExecutionContext::allocate_tensors() {
     int skipped_count = 0;
     int failed_count = 0;
 
-    const bool use_memory_pools =
-        plan_->config().enable_memory_planning && !plan_->get_memory_plan().pools.empty();
+    const bool use_memory_pools = plan_->config().enable_memory_planning;
 
     auto status = prepare_memory_pools(use_memory_pools);
     if (status != core::Status::SUCCESS) {
@@ -100,64 +99,31 @@ core::Status ExecutionContext::prepare_memory_pools(bool use_memory_pools) {
     shared_buffer_size_ = 0;
 
     if (!use_memory_pools) {
-        if (plan_->config().enable_memory_planning && plan_->config().enable_profiling) {
-            MI_LOG_WARNING(
-                "[ExecutionContext] Memory planning enabled but no pools available; "
-                "falling back to per-tensor allocations");
-        }
         return core::Status::SUCCESS;
     }
 
     const auto& plan = plan_->get_memory_plan();
-    if (plan.shared_buffer_size > 0) {
-        shared_buffer_size_ = plan.shared_buffer_size;
-        void* raw = core::CPUAllocator::get_instance()->allocate(
-            shared_buffer_size_, plan_->config().memory_alignment);
-        if (!raw) {
-            MI_LOG_ERROR("[ExecutionContext] Failed to allocate shared buffer of size " +
-                         std::to_string(shared_buffer_size_) + " bytes");
-            return core::Status::ERROR_RUNTIME;
-        }
-        std::memset(raw, 0, shared_buffer_size_);
-        shared_buffer_.reset(raw, [](void* p) {
-            core::CPUAllocator::get_instance()->deallocate(p);
-        });
-        if (plan_->config().enable_profiling) {
-            MI_LOG_INFO("[ExecutionContext] Created shared buffer (" +
-                        std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
-        }
-        return core::Status::SUCCESS;
+    if (plan.shared_buffer_size == 0) {
+        MI_LOG_ERROR("[ExecutionContext] Memory planning enabled but shared buffer size is 0");
+        return core::Status::ERROR_RUNTIME;
     }
 
-    const auto& pools = plan.pools;
-    memory_pool_buffers_.reserve(pools.size());
-    for (const auto& pool : pools) {
-        void* raw = nullptr;
-        if (pool.size_bytes > 0) {
-            raw = core::CPUAllocator::get_instance()->allocate(
-                pool.size_bytes, plan_->config().memory_alignment);
-        }
-
-        if (!raw && pool.size_bytes > 0) {
-            MI_LOG_ERROR("[ExecutionContext] Failed to allocate memory pool " +
-                         std::to_string(pool.pool_id) + " of size " +
-                         std::to_string(pool.size_bytes) + " bytes");
-            return core::Status::ERROR_RUNTIME;
-        }
-
-        if (raw) {
-            std::memset(raw, 0, pool.size_bytes);
-        }
-
-        memory_pool_buffers_.emplace_back(
-            raw, [](void* p) { core::CPUAllocator::get_instance()->deallocate(p); });
-
-        if (plan_->config().enable_profiling) {
-            MI_LOG_INFO("[ExecutionContext] Created memory pool " + std::to_string(pool.pool_id) +
-                        " (" + std::to_string(pool.size_bytes / 1024.0) + " KB)");
-        }
+    shared_buffer_size_ = plan.shared_buffer_size;
+    void* raw = core::CPUAllocator::get_instance()->allocate(
+        shared_buffer_size_, plan_->config().memory_alignment);
+    if (!raw) {
+        MI_LOG_ERROR("[ExecutionContext] Failed to allocate shared buffer of size " +
+                     std::to_string(shared_buffer_size_) + " bytes");
+        return core::Status::ERROR_RUNTIME;
     }
-
+    std::memset(raw, 0, shared_buffer_size_);
+    shared_buffer_.reset(raw, [](void* p) {
+        core::CPUAllocator::get_instance()->deallocate(p);
+    });
+    if (plan_->config().enable_profiling) {
+        MI_LOG_INFO("[ExecutionContext] Created shared buffer (" +
+                    std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
+    }
     return core::Status::SUCCESS;
 }
 
@@ -224,7 +190,12 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
             continue;
         }
         if (bind_result == PoolBindResult::kFailed) {
-            continue;
+            return core::Status::ERROR_RUNTIME;
+        }
+        if (use_memory_pools) {
+            MI_LOG_ERROR("[ExecutionContext] Missing memory plan entry for node " +
+                         std::to_string(node->id()) + " output[" + std::to_string(i) + "]");
+            return core::Status::ERROR_RUNTIME;
         }
 
         try {
@@ -293,47 +264,7 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
         return PoolBindResult::kBound;
     }
 
-    if (node_id >= plan.tensor_to_pool.size() ||
-        plan.tensor_to_pool[node_id] == MemoryPlan::kInvalidPool) {
-        return PoolBindResult::kNotTried;
-    }
-
-    int pool_id = plan.tensor_to_pool[node_id];
-    const bool valid_pool =
-        pool_id >= 0 && static_cast<size_t>(pool_id) < memory_pool_buffers_.size() &&
-        static_cast<size_t>(pool_id) < plan.pools.size() && memory_pool_buffers_[pool_id] != nullptr;
-
-    if (!valid_pool) {
-        MI_LOG_WARNING("[ExecutionContext] Memory plan pool unavailable for node " +
-                       std::to_string(node_id) + ", falling back to independent allocation");
-        return PoolBindResult::kNotTried;
-    }
-
-    const size_t required = tensor->size_in_bytes();
-    const size_t pool_size = plan.pools[static_cast<size_t>(pool_id)].size_bytes;
-
-    if (required > pool_size) {
-        MI_LOG_ERROR("[ExecutionContext] Node " + std::to_string(node_id) + " output[" +
-                     std::to_string(output_index) + "] requires " +
-                     std::to_string(required) + " bytes, but pool " +
-                     std::to_string(pool_id) + " size is " + std::to_string(pool_size));
-        failed_count++;
-        return PoolBindResult::kFailed;
-    }
-
-    tensor->bind_external_data(memory_pool_buffers_[pool_id],
-                               plan.pools[static_cast<size_t>(pool_id)].size_bytes);
-    allocated_count++;
-
-    if (plan_->config().enable_profiling) {
-        MI_LOG_INFO("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
-                    " output[" +
-                    std::to_string(output_index) + "] to pool " + std::to_string(pool_id) + " (" +
-                    std::to_string(required / 1024.0) + " KB, pool size " +
-                    std::to_string(pool_size / 1024.0) + " KB)");
-    }
-
-    return PoolBindResult::kBound;
+    return PoolBindResult::kNotTried;
 }
 
 core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& node) {

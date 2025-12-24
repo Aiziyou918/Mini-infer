@@ -134,7 +134,7 @@ void LivenessAnalyzer::compute_producers_consumers(
 
 bool LivenessAnalyzer::is_persistent_tensor(const std::string& tensor_name, graph::Graph* graph) {
     // Check if the tensor is an input or output
-    if (graph->is_input(tensor_name) || graph->is_output(tensor_name)) {
+    if (graph->is_input(tensor_name)) {
         return true;
     }
 
