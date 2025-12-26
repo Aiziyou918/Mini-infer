@@ -68,14 +68,14 @@ TEST(EngineWithProfileTest, BasicUsage) {
     
     EXPECT_EQ(status, core::Status::SUCCESS);
     
-    // Check that input shape was set to optimal
+    // Check that input shape was set to max (for sufficient memory allocation)
     auto updated_input = graph->get_node("input");
     ASSERT_NE(updated_input, nullptr);
     ASSERT_FALSE(updated_input->output_tensors().empty());
     ASSERT_NE(updated_input->output_tensors()[0], nullptr);
-    
+
     auto shape = updated_input->output_tensors()[0]->shape();
-    EXPECT_EQ(shape.to_string(), "[4, 3, 384, 384]");  // Should be optimal shape
+    EXPECT_EQ(shape.to_string(), "[8, 3, 512, 512]");  // Should be max shape
 }
 
 TEST(EngineWithProfileTest, WithoutProfile) {
