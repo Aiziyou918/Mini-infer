@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
         std::cout << "[SUCCESS] Model parsed successfully!" << std::endl;
         std::cout << "Graph has " << graph->node_count() << " nodes" << std::endl;
         std::cout << std::endl;
-        
+
         // Step 2: Build Inference Plan
         std::cout << "Step 2: Building Inference Plan" << std::endl;
         std::cout << std::string(70, '-') << std::endl;
@@ -406,6 +406,8 @@ int main(int argc, char** argv) {
         runtime::EngineConfig config;
         config.device_type = core::DeviceType::CPU;
         config.enable_profiling = false;
+        config.enable_graph_optimization = false;  // Disable graph optimization to avoid shape inference issues
+        config.enable_memory_planning = false;     // Disable memory planning for now
         
         auto plan = std::make_shared<runtime::InferencePlan>(config);
         auto status = plan->build(graph);

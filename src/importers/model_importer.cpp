@@ -220,21 +220,21 @@ core::Status ModelImporter::import_inputs(
     ImporterContext& ctx
 ) {
     ctx.log_info("Importing " + std::to_string(graph_proto.input_size()) + " inputs");
-    
+
     for (int i = 0; i < graph_proto.input_size(); ++i) {
         const auto& input = graph_proto.input(i);
         const std::string& name = input.name();
-        
+
         // Skip if already registered as weight
         if (ctx.is_weight(name)) {
             ctx.log_info("  Skipping input (is weight): " + name);
             continue;
         }
-        
+
         // Parse declared metadata (dtype + shape)
         auto declared_shape = parse_value_info_shape(input, ctx, name);
         auto declared_dtype = parse_value_info_dtype(input, ctx, name);
-        
+
         // Create placeholder tensor for input if not already registered
         if (!ctx.has_tensor(name)) {
             auto input_tensor = std::make_shared<core::Tensor>();
@@ -245,13 +245,27 @@ core::Status ModelImporter::import_inputs(
             } else {
                 ctx.log_info("  Declared input: " + name + " (shape unknown)");
             }
-            
+
             ctx.register_tensor(name, input_tensor);
         } else {
             ctx.log_info("  Input already registered: " + name);
         }
+
+        // BUGFIX: Create input node and set its output tensor
+        // This ensures the input node's output_tensors() contains the tensor with shape info
+        auto input_node = ctx.get_graph()->get_node(name);
+        if (!input_node) {
+            input_node = ctx.get_graph()->create_node(name);
+        }
+
+        // Set the registered tensor as the node's output
+        auto input_tensor = ctx.get_tensor(name);
+        if (input_tensor) {
+            input_node->set_output_tensors({input_tensor});
+            ctx.log_info("  Set output tensor for input node: " + name);
+        }
     }
-    
+
     return core::Status::SUCCESS;
 }
 

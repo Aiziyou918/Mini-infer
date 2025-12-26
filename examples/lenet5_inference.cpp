@@ -106,102 +106,141 @@ public:
     std::shared_ptr<core::Tensor> forward(std::shared_ptr<core::Tensor> input) {
         auto x = input;
         
-        // Conv1 + ReLU + Pool
-        std::vector<std::shared_ptr<core::Tensor>> conv1_outputs;
+        // Conv1: [N, 1, 28, 28] -> [N, 6, 24, 24]
+        std::vector<core::Shape> conv1_output_shapes;
+        conv1_->infer_shape({x->shape(), weights_.conv1_weight->shape(), weights_.conv1_bias->shape()}, conv1_output_shapes);
+        auto conv1_out = core::Tensor::create(conv1_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> conv1_outputs = {conv1_out};
         auto status = conv1_->forward({x, weights_.conv1_weight, weights_.conv1_bias}, conv1_outputs);
-        if (status != core::Status::SUCCESS || conv1_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: Conv1 forward failed (status=" << static_cast<int>(status) << ")" << std::endl;
             return nullptr;
         }
-        x = conv1_outputs[0];  // [N, 6, 24, 24]
+        x = conv1_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> relu1_outputs;
+        // ReLU1
+        std::vector<core::Shape> relu1_output_shapes;
+        relu_->infer_shape({x->shape()}, relu1_output_shapes);
+        auto relu1_out = core::Tensor::create(relu1_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> relu1_outputs = {relu1_out};
         status = relu_->forward({x}, relu1_outputs);
-        if (status != core::Status::SUCCESS || relu1_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: ReLU1 forward failed" << std::endl;
             return nullptr;
         }
         x = relu1_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> pool1_outputs;
+        // Pool1: [N, 6, 24, 24] -> [N, 6, 12, 12]
+        std::vector<core::Shape> pool1_output_shapes;
+        pool_->infer_shape({x->shape()}, pool1_output_shapes);
+        auto pool1_out = core::Tensor::create(pool1_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> pool1_outputs = {pool1_out};
         status = pool_->forward({x}, pool1_outputs);
-        if (status != core::Status::SUCCESS || pool1_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: Pool1 forward failed" << std::endl;
             return nullptr;
         }
-        x = pool1_outputs[0];  // [N, 6, 12, 12]
+        x = pool1_outputs[0];
         
-        // Conv2 + ReLU + Pool
-        std::vector<std::shared_ptr<core::Tensor>> conv2_outputs;
+        // Conv2: [N, 6, 12, 12] -> [N, 16, 8, 8]
+        std::vector<core::Shape> conv2_output_shapes;
+        conv2_->infer_shape({x->shape(), weights_.conv2_weight->shape(), weights_.conv2_bias->shape()}, conv2_output_shapes);
+        auto conv2_out = core::Tensor::create(conv2_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> conv2_outputs = {conv2_out};
         status = conv2_->forward({x, weights_.conv2_weight, weights_.conv2_bias}, conv2_outputs);
-        if (status != core::Status::SUCCESS || conv2_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: Conv2 forward failed" << std::endl;
             return nullptr;
         }
-        x = conv2_outputs[0];  // [N, 16, 8, 8]
+        x = conv2_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> relu2_outputs;
+        // ReLU2
+        std::vector<core::Shape> relu2_output_shapes;
+        relu_->infer_shape({x->shape()}, relu2_output_shapes);
+        auto relu2_out = core::Tensor::create(relu2_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> relu2_outputs = {relu2_out};
         status = relu_->forward({x}, relu2_outputs);
-        if (status != core::Status::SUCCESS || relu2_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: ReLU2 forward failed" << std::endl;
             return nullptr;
         }
         x = relu2_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> pool2_outputs;
+        // Pool2: [N, 16, 8, 8] -> [N, 16, 4, 4]
+        std::vector<core::Shape> pool2_output_shapes;
+        pool_->infer_shape({x->shape()}, pool2_output_shapes);
+        auto pool2_out = core::Tensor::create(pool2_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> pool2_outputs = {pool2_out};
         status = pool_->forward({x}, pool2_outputs);
-        if (status != core::Status::SUCCESS || pool2_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: Pool2 forward failed" << std::endl;
             return nullptr;
         }
-        x = pool2_outputs[0];  // [N, 16, 4, 4]
+        x = pool2_outputs[0];
         
         // Flatten: [N, 16, 4, 4] → [N, 256]
         int batch_size = x->shape()[0];
         x = reshape(x, {batch_size, 256});
         
-        // FC1 + ReLU
-        std::vector<std::shared_ptr<core::Tensor>> fc1_outputs;
+        // FC1: [N, 256] -> [N, 120]
+        std::vector<core::Shape> fc1_output_shapes;
+        fc1_->infer_shape({x->shape(), weights_.fc1_weight->shape(), weights_.fc1_bias->shape()}, fc1_output_shapes);
+        auto fc1_out = core::Tensor::create(fc1_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> fc1_outputs = {fc1_out};
         status = fc1_->forward({x, weights_.fc1_weight, weights_.fc1_bias}, fc1_outputs);
-        if (status != core::Status::SUCCESS || fc1_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: FC1 forward failed" << std::endl;
             return nullptr;
         }
-        x = fc1_outputs[0];  // [N, 120]
+        x = fc1_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> relu3_outputs;
+        // ReLU3
+        std::vector<core::Shape> relu3_output_shapes;
+        relu_->infer_shape({x->shape()}, relu3_output_shapes);
+        auto relu3_out = core::Tensor::create(relu3_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> relu3_outputs = {relu3_out};
         status = relu_->forward({x}, relu3_outputs);
-        if (status != core::Status::SUCCESS || relu3_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: ReLU3 forward failed" << std::endl;
             return nullptr;
         }
         x = relu3_outputs[0];
         
-        // FC2 + ReLU
-        std::vector<std::shared_ptr<core::Tensor>> fc2_outputs;
+        // FC2: [N, 120] -> [N, 84]
+        std::vector<core::Shape> fc2_output_shapes;
+        fc2_->infer_shape({x->shape(), weights_.fc2_weight->shape(), weights_.fc2_bias->shape()}, fc2_output_shapes);
+        auto fc2_out = core::Tensor::create(fc2_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> fc2_outputs = {fc2_out};
         status = fc2_->forward({x, weights_.fc2_weight, weights_.fc2_bias}, fc2_outputs);
-        if (status != core::Status::SUCCESS || fc2_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: FC2 forward failed" << std::endl;
             return nullptr;
         }
-        x = fc2_outputs[0];  // [N, 84]
+        x = fc2_outputs[0];
         
-        std::vector<std::shared_ptr<core::Tensor>> relu4_outputs;
+        // ReLU4
+        std::vector<core::Shape> relu4_output_shapes;
+        relu_->infer_shape({x->shape()}, relu4_output_shapes);
+        auto relu4_out = core::Tensor::create(relu4_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> relu4_outputs = {relu4_out};
         status = relu_->forward({x}, relu4_outputs);
-        if (status != core::Status::SUCCESS || relu4_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: ReLU4 forward failed" << std::endl;
             return nullptr;
         }
         x = relu4_outputs[0];
         
-        // FC3 (no activation)
-        std::vector<std::shared_ptr<core::Tensor>> fc3_outputs;
+        // FC3: [N, 84] -> [N, 10] (no activation)
+        std::vector<core::Shape> fc3_output_shapes;
+        fc3_->infer_shape({x->shape(), weights_.fc3_weight->shape(), weights_.fc3_bias->shape()}, fc3_output_shapes);
+        auto fc3_out = core::Tensor::create(fc3_output_shapes[0], core::DataType::FLOAT32);
+        std::vector<std::shared_ptr<core::Tensor>> fc3_outputs = {fc3_out};
         status = fc3_->forward({x, weights_.fc3_weight, weights_.fc3_bias}, fc3_outputs);
-        if (status != core::Status::SUCCESS || fc3_outputs.empty()) {
+        if (status != core::Status::SUCCESS) {
             std::cerr << "Error: FC3 forward failed" << std::endl;
             return nullptr;
         }
-        x = fc3_outputs[0];  // [N, 10]
+        x = fc3_outputs[0];
         
         return x;
     }

@@ -51,8 +51,7 @@ class ExecutionContext {
     core::Status allocate_tensors();
     core::Status prepare_memory_pools(bool use_memory_pools);
     core::Status allocate_node_outputs(const std::shared_ptr<graph::Node>& node, bool use_pools,
-                                       int& allocated_count, int& skipped_count,
-                                       int& failed_count);
+                                       int& allocated_count, int& skipped_count, int& failed_count);
 
     enum class PoolBindResult { kNotTried, kBound, kFailed };
 
@@ -63,8 +62,7 @@ class ExecutionContext {
 
     core::Status execute_node(const std::shared_ptr<graph::Node>& node);
 
-    std::shared_ptr<backends::DeviceContext> get_or_create_context(
-        core::DeviceType device_type);
+    std::shared_ptr<backends::DeviceContext> get_or_create_context(core::DeviceType device_type);
 
     std::shared_ptr<const InferencePlan> plan_;
     std::vector<std::shared_ptr<void>> memory_pool_buffers_;

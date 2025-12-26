@@ -122,8 +122,7 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
     auto& conv_outputs = conv_node->mutable_outputs();
     conv_outputs.erase(std::remove_if(conv_outputs.begin(), conv_outputs.end(),
                                       [&](const Node::Edge& e) {
-                                          return e.node &&
-                                                 e.node->name() == activation_node->name();
+                                          return e.node && e.node->id() == activation_node->id();
                                       }),
                        conv_outputs.end());
 
@@ -135,7 +134,7 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
         consumer_inputs.erase(std::remove_if(consumer_inputs.begin(), consumer_inputs.end(),
                                              [&](const Node::Edge& e) {
                                                  return e.node &&
-                                                        e.node->name() == activation_node->name();
+                                                        e.node->id() == activation_node->id();
                                              }),
                               consumer_inputs.end());
 

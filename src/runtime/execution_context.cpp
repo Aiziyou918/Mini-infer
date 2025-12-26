@@ -82,9 +82,8 @@ core::Status ExecutionContext::allocate_tensors() {
     }
 
     MI_LOG_INFO("[ExecutionContext] Tensor allocation completed: " +
-                std::to_string(allocated_count) + " allocated, " +
-                std::to_string(skipped_count) + " skipped, " +
-                std::to_string(failed_count) + " failed");
+                std::to_string(allocated_count) + " allocated, " + std::to_string(skipped_count) +
+                " skipped, " + std::to_string(failed_count) + " failed");
 
     if (failed_count > 0) {
         MI_LOG_WARNING("[ExecutionContext] Some tensors failed to allocate, inference may fail");
@@ -109,17 +108,15 @@ core::Status ExecutionContext::prepare_memory_pools(bool use_memory_pools) {
     }
 
     shared_buffer_size_ = plan.shared_buffer_size;
-    void* raw = core::CPUAllocator::get_instance()->allocate(
-        shared_buffer_size_, plan_->config().memory_alignment);
+    void* raw = core::CPUAllocator::get_instance()->allocate(shared_buffer_size_,
+                                                             plan_->config().memory_alignment);
     if (!raw) {
         MI_LOG_ERROR("[ExecutionContext] Failed to allocate shared buffer of size " +
                      std::to_string(shared_buffer_size_) + " bytes");
         return core::Status::ERROR_RUNTIME;
     }
     std::memset(raw, 0, shared_buffer_size_);
-    shared_buffer_.reset(raw, [](void* p) {
-        core::CPUAllocator::get_instance()->deallocate(p);
-    });
+    shared_buffer_.reset(raw, [](void* p) { core::CPUAllocator::get_instance()->deallocate(p); });
     if (plan_->config().enable_profiling) {
         MI_LOG_INFO("[ExecutionContext] Created shared buffer (" +
                     std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
@@ -183,9 +180,8 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
         tensor->set_shape_metadata(shape);
         tensor->set_dtype(tmpl->dtype());
 
-        const auto bind_result =
-            try_bind_tensor_to_pool(node->id(), i, tensor, use_memory_pools, allocated_count,
-                                    failed_count);
+        const auto bind_result = try_bind_tensor_to_pool(node->id(), i, tensor, use_memory_pools,
+                                                         allocated_count, failed_count);
         if (bind_result == PoolBindResult::kBound) {
             continue;
         }
@@ -203,8 +199,8 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
             allocated_count++;
 
             if (plan_->config().enable_profiling) {
-                MI_LOG_INFO("[ExecutionContext] Allocated tensor for " + node->name() +
-                            " output[" + std::to_string(i) + "]: " + shape.to_string() + " (" +
+                MI_LOG_INFO("[ExecutionContext] Allocated tensor for " + node->name() + " output[" +
+                            std::to_string(i) + "]: " + shape.to_string() + " (" +
                             std::to_string(tensor->size_in_bytes() / 1024.0) + " KB)");
             }
         } catch (const std::exception& e) {
@@ -238,10 +234,9 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
         const size_t offset = plan.tensor_offsets[node_id];
         if (offset + required > shared_buffer_size_) {
             MI_LOG_ERROR("[ExecutionContext] Node " + std::to_string(node_id) + " output[" +
-                         std::to_string(output_index) + "] requires " +
-                         std::to_string(required) + " bytes at offset " +
-                         std::to_string(offset) + ", exceeds shared buffer size " +
-                         std::to_string(shared_buffer_size_));
+                         std::to_string(output_index) + "] requires " + std::to_string(required) +
+                         " bytes at offset " + std::to_string(offset) +
+                         ", exceeds shared buffer size " + std::to_string(shared_buffer_size_));
             failed_count++;
             return PoolBindResult::kFailed;
         }
@@ -256,10 +251,8 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
         allocated_count++;
         if (plan_->config().enable_profiling) {
             MI_LOG_INFO("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
-                        " output[" +
-                        std::to_string(output_index) + "] to shared buffer offset " +
-                        std::to_string(offset) + " (" + std::to_string(required / 1024.0) +
-                        " KB)");
+                        " output[" + std::to_string(output_index) + "] to shared buffer offset " +
+                        std::to_string(offset) + " (" + std::to_string(required / 1024.0) + " KB)");
         }
         return PoolBindResult::kBound;
     }
