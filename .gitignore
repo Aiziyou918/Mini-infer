@@ -53,6 +53,7 @@ _deps/
 *.cmake
 # Allow cmake modules in cmake/ directory
 !cmake/*.cmake
+CMakeUserPresets.json
 
 # Build artifacts
 bin/
