@@ -87,15 +87,14 @@ if not "%code%"=="0" (
 set "ACC="
 set "TOTAL="
 set "CORR="
-for /f "tokens=3" %%a in ('findstr /C:"Accuracy:" "%TEMP%\cuda_output.txt"') do set "ACC=%%a"
+for /f "tokens=2" %%a in ('findstr /C:"Accuracy:" "%TEMP%\cuda_output.txt"') do set "ACC=%%a"
 for /f "tokens=3" %%a in ('findstr /C:"Total samples:" "%TEMP%\cuda_output.txt"') do set "TOTAL=%%a"
 for /f "tokens=3" %%a in ('findstr /C:"Correct predictions:" "%TEMP%\cuda_output.txt"') do set "CORR=%%a"
 
 set "PASS=0"
 if defined ACC (
-    for /f "tokens=1 delims=%" %%a in ("%ACC%") do set "ACC_NUM=%%a"
-    rem Check ACC >= 99.0
-    set /a ACC_INT=!ACC_NUM!
+    for /f "tokens=1 delims=%%" %%a in ("!ACC!") do set "ACC_NUM=%%a"
+    for /f "tokens=1 delims=." %%a in ("!ACC_NUM!") do set "ACC_INT=%%a"
     if !ACC_INT! GEQ 99 set "PASS=1"
 )
 if "!PASS!"=="0" if defined TOTAL if defined CORR (

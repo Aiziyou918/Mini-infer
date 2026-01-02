@@ -73,18 +73,24 @@ if ($code -ne 0) {
     exit $code
 }
 
-# Parse results
-$accMatch   = [regex]::Match($output, "Accuracy:\s+([\d\.]+)\s*%")
-$corrMatch  = [regex]::Match($output, "Correct predictions:\s+(\d+)")
-$totalMatch = [regex]::Match($output, "Total samples:\s+(\d+)")
-$avgTimeMatch = [regex]::Match($output, "Average time per sample:\s+([\d\.]+)\s*ms")
-$throughputMatch = [regex]::Match($output, "Throughput:\s+([\d\.]+)\s*samples/sec")
+# Parse results (GPU results section)
+$accMatch   = [regex]::Match($output, "Accuracy:\s*([\d\.]+)\s*%")
+$corrMatch  = [regex]::Match($output, "Correct predictions:\s*(\d+)")
+$totalMatch = [regex]::Match($output, "Total samples:\s*(\d+)")
+$avgTimeMatch = [regex]::Match($output, "Average time per sample:\s*([\d\.]+)\s*ms")
+$throughputMatch = [regex]::Match($output, "Throughput:\s*([\d\.]+)\s*samples/sec")
 
 $pass = $false
-if ($accMatch.Success -and $totalMatch.Success) {
-    $acc = [double]$accMatch.Groups[1].Value
+if ($totalMatch.Success) {
     $total = [int]$totalMatch.Groups[1].Value
-    $pass = ($acc -ge 99.0) -or ($corrMatch.Success -and ([int]$corrMatch.Groups[1].Value -eq $total))
+    if ($accMatch.Success) {
+        $acc = [double]$accMatch.Groups[1].Value
+        $pass = ($acc -ge 99.0)
+    }
+    if (-not $pass -and $corrMatch.Success) {
+        $corr = [int]$corrMatch.Groups[1].Value
+        $pass = ($corr -eq $total)
+    }
 }
 
 Write-Host ""
