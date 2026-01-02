@@ -3,11 +3,15 @@
 #include <algorithm>
 #include <cstring>
 
-#include "mini_infer/core/allocator.h"
+#include "mini_infer/backends/cpu/cpu_allocator.h"
 #include "mini_infer/kernels/kernel_registry.h"
 #include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/utils/logger.h"
 
+#ifdef MINI_INFER_USE_CUDA
+#include "mini_infer/backends/cuda/cuda_device_context.h"
+#include "mini_infer/backends/cuda/cuda_allocator.h"
+#endif
 namespace mini_infer {
 namespace runtime {
 
@@ -22,7 +26,18 @@ core::Status ExecutionContext::initialize() {
         return core::Status::ERROR_RUNTIME;
     }
 
-    contexts_.emplace(core::DeviceType::CPU, std::make_shared<backends::CPUDeviceContext>());
+    // Create device context based on configured device type
+    core::DeviceType device_type = plan_->config().device_type;
+#ifdef MINI_INFER_USE_CUDA
+    if (device_type == core::DeviceType::CUDA) {
+        contexts_.emplace(core::DeviceType::CUDA,
+                          std::make_shared<backends::cuda::CUDADeviceContext>(plan_->config().device_id));
+    } else
+#endif
+    {
+        contexts_.emplace(core::DeviceType::CPU, std::make_shared<backends::CPUDeviceContext>());
+    }
+
     node_outputs_.clear();
     node_outputs_.resize(plan_->graph()->node_capacity());
 
@@ -108,18 +123,49 @@ core::Status ExecutionContext::prepare_memory_pools(bool use_memory_pools) {
     }
 
     shared_buffer_size_ = plan.shared_buffer_size;
-    void* raw = core::CPUAllocator::get_instance()->allocate(shared_buffer_size_,
-                                                             plan_->config().memory_alignment);
-    if (!raw) {
-        MI_LOG_ERROR("[ExecutionContext] Failed to allocate shared buffer of size " +
-                     std::to_string(shared_buffer_size_) + " bytes");
-        return core::Status::ERROR_RUNTIME;
-    }
-    std::memset(raw, 0, shared_buffer_size_);
-    shared_buffer_.reset(raw, [](void* p) { core::CPUAllocator::get_instance()->deallocate(p); });
-    if (plan_->config().enable_profiling) {
-        MI_LOG_INFO("[ExecutionContext] Created shared buffer (" +
-                    std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
+
+    // Allocate shared buffer based on device type
+    core::DeviceType device_type = plan_->config().device_type;
+    void* raw = nullptr;
+
+#ifdef MINI_INFER_USE_CUDA
+    if (device_type == core::DeviceType::CUDA) {
+        // Use CUDA allocator for GPU memory
+        auto cuda_allocator = std::make_shared<backends::cuda::CUDAAllocator>(plan_->config().device_id);
+        raw = cuda_allocator->allocate(shared_buffer_size_, plan_->config().memory_alignment);
+        if (!raw) {
+            MI_LOG_ERROR("[ExecutionContext] Failed to allocate CUDA shared buffer of size " +
+                         std::to_string(shared_buffer_size_) + " bytes");
+            return core::Status::ERROR_RUNTIME;
+        }
+        // Zero-initialize CUDA memory
+        cudaMemset(raw, 0, shared_buffer_size_);
+        // Store allocator to prevent destruction before buffer is freed
+        cuda_allocator_ = cuda_allocator;
+        shared_buffer_.reset(raw, [allocator = cuda_allocator](void* p) {
+            allocator->deallocate(p);
+        });
+        if (plan_->config().enable_profiling) {
+            MI_LOG_INFO("[ExecutionContext] Created CUDA shared buffer (" +
+                        std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
+        }
+    } else
+#endif
+    {
+        // Use CPU allocator for CPU memory
+        raw = backends::cpu::CPUAllocator::instance()->allocate(shared_buffer_size_,
+                                                                 plan_->config().memory_alignment);
+        if (!raw) {
+            MI_LOG_ERROR("[ExecutionContext] Failed to allocate shared buffer of size " +
+                         std::to_string(shared_buffer_size_) + " bytes");
+            return core::Status::ERROR_RUNTIME;
+        }
+        std::memset(raw, 0, shared_buffer_size_);
+        shared_buffer_.reset(raw, [](void* p) { backends::cpu::CPUAllocator::instance()->deallocate(p); });
+        if (plan_->config().enable_profiling) {
+            MI_LOG_INFO("[ExecutionContext] Created shared buffer (" +
+                        std::to_string(shared_buffer_size_ / 1024.0) + " KB)");
+        }
     }
     return core::Status::SUCCESS;
 }
@@ -195,7 +241,7 @@ core::Status ExecutionContext::allocate_node_outputs(const std::shared_ptr<graph
         }
 
         try {
-            *tensor = core::Tensor(shape, tensor->dtype());
+            *tensor = core::Tensor(shape, tensor->dtype(), plan_->config().device_type);
             allocated_count++;
 
             if (plan_->config().enable_profiling) {
@@ -241,7 +287,9 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
             return PoolBindResult::kFailed;
         }
 
-        if (!tensor->bind_external_data_with_offset(shared_buffer_, shared_buffer_size_, offset)) {
+        core::DeviceType device_type = plan_->config().device_type;
+        if (!tensor->bind_external_data_with_offset(shared_buffer_, shared_buffer_size_, offset,
+                                                    device_type)) {
             MI_LOG_ERROR("[ExecutionContext] Failed to bind shared buffer for node " +
                          std::to_string(node_id));
             failed_count++;
@@ -310,13 +358,45 @@ core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& 
         merged_inputs = input_tensors;
     }
 
+    // Use the configured device type from the plan
     core::DeviceType device_type = plan_->config().device_type;
-    for (const auto& tensor : merged_inputs) {
-        if (tensor) {
-            device_type = tensor->device();
-            break;
+
+#ifdef MINI_INFER_USE_CUDA
+    if (device_type == core::DeviceType::CUDA) {
+        auto ensure_on_gpu = [&](std::shared_ptr<core::Tensor>& tensor) -> core::Status {
+            if (!tensor || tensor->device() == core::DeviceType::CUDA) {
+                return core::Status::SUCCESS;
+            }
+
+            auto cache_it = gpu_constant_cache_.find(tensor.get());
+            if (cache_it != gpu_constant_cache_.end() && cache_it->second) {
+                tensor = cache_it->second;
+                return core::Status::SUCCESS;
+            }
+
+            auto gpu_tensor = std::make_shared<core::Tensor>(
+                tensor->shape(), tensor->dtype(), core::DeviceType::CUDA);
+            size_t size_bytes = tensor->size_in_bytes();
+            cudaError_t status =
+                cudaMemcpy(gpu_tensor->data(), tensor->data(), size_bytes, cudaMemcpyHostToDevice);
+            if (status != cudaSuccess) {
+                MI_LOG_ERROR("[ExecutionContext] Failed to copy tensor '" + node->name() +
+                             "' input to GPU: " + std::string(cudaGetErrorString(status)));
+                return core::Status::ERROR_RUNTIME;
+            }
+            gpu_constant_cache_[tensor.get()] = gpu_tensor;
+            tensor = gpu_tensor;
+            return core::Status::SUCCESS;
+        };
+
+        for (auto& tensor : merged_inputs) {
+            auto status = ensure_on_gpu(tensor);
+            if (status != core::Status::SUCCESS) {
+                return status;
+            }
         }
     }
+#endif
 
     auto context = get_or_create_context(device_type);
     if (!context) {
@@ -350,6 +430,14 @@ std::shared_ptr<backends::DeviceContext> ExecutionContext::get_or_create_context
         contexts_.emplace(device_type, context);
         return context;
     }
+
+#ifdef MINI_INFER_USE_CUDA
+    if (device_type == core::DeviceType::CUDA) {
+        auto context = std::make_shared<backends::cuda::CUDADeviceContext>(plan_->config().device_id);
+        contexts_.emplace(device_type, context);
+        return context;
+    }
+#endif
 
     return nullptr;
 }

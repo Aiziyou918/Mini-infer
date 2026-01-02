@@ -6,6 +6,10 @@
 #include "mini_infer/runtime/execution_context.h"
 #include "mini_infer/utils/logger.h"
 
+#ifdef MINI_INFER_USE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 namespace mini_infer {
 namespace runtime {
 
@@ -600,7 +604,29 @@ core::Status InferencePlan::bind_ordered_inputs(
             }
         }
 
-        outputs[0] = tensor;
+#ifdef MINI_INFER_USE_CUDA
+        // For CUDA device, copy input data from CPU to GPU
+        if (config_.device_type == core::DeviceType::CUDA) {
+            // Create or reuse GPU tensor for input
+            if (!outputs[0] || outputs[0]->shape() != tensor->shape() ||
+                outputs[0]->device() != core::DeviceType::CUDA) {
+                outputs[0] = std::make_shared<core::Tensor>(tensor->shape(), tensor->dtype(),
+                                                            core::DeviceType::CUDA);
+            }
+
+            // Copy data from CPU to GPU
+            size_t size_bytes = tensor->size_in_bytes();
+            cudaError_t status = cudaMemcpy(outputs[0]->data(), tensor->data(), size_bytes, cudaMemcpyHostToDevice);
+            if (status != cudaSuccess) {
+                MI_LOG_ERROR("[InferencePlan] Failed to copy input '" + binding.name +
+                             "' to GPU: " + std::string(cudaGetErrorString(status)));
+                return core::Status::ERROR_RUNTIME;
+            }
+        } else
+#endif
+        {
+            outputs[0] = tensor;
+        }
     }
 
     return core::Status::SUCCESS;
@@ -629,6 +655,25 @@ core::Status InferencePlan::collect_ordered_outputs(ExecutionContext* ctx) const
         if (node->id() < ctx->node_outputs_.size() && !ctx->node_outputs_[node->id()].empty()) {
             output_tensor = ctx->node_outputs_[node->id()][0];
         }
+
+#ifdef MINI_INFER_USE_CUDA
+        // For CUDA device, copy output data from GPU to CPU
+        if (config_.device_type == core::DeviceType::CUDA && output_tensor && output_tensor->data()) {
+            // Synchronize to ensure all GPU operations are complete
+            cudaDeviceSynchronize();
+
+            // Create CPU tensor and copy data from GPU
+            auto cpu_tensor = std::make_shared<core::Tensor>(output_tensor->shape(), output_tensor->dtype());
+            size_t size_bytes = output_tensor->size_in_bytes();
+            cudaError_t status = cudaMemcpy(cpu_tensor->data(), output_tensor->data(), size_bytes, cudaMemcpyDeviceToHost);
+            if (status != cudaSuccess) {
+                MI_LOG_ERROR("[InferencePlan] Failed to copy output '" + output_name +
+                             "' from GPU: " + std::string(cudaGetErrorString(status)));
+                return core::Status::ERROR_RUNTIME;
+            }
+            output_tensor = cpu_tensor;
+        }
+#endif
 
         ctx->ordered_outputs_.push_back(output_tensor);
         if (output_tensor) {

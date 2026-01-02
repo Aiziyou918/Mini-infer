@@ -6,6 +6,7 @@
 
 #include "mini_infer/backends/device_context.h"
 #include "mini_infer/core/tensor.h"
+#include "mini_infer/core/allocator.h"
 #include "mini_infer/runtime/shape_inference_engine.h"
 
 namespace mini_infer {
@@ -68,6 +69,10 @@ class ExecutionContext {
     std::vector<std::shared_ptr<void>> memory_pool_buffers_;
     std::shared_ptr<void> shared_buffer_;
     size_t shared_buffer_size_{0};
+    std::shared_ptr<core::Allocator> cuda_allocator_;  // Keep CUDA allocator alive for shared_buffer_
+#ifdef MINI_INFER_USE_CUDA
+    std::unordered_map<const core::Tensor*, std::shared_ptr<core::Tensor>> gpu_constant_cache_;
+#endif
     std::unordered_map<core::DeviceType, std::shared_ptr<backends::DeviceContext>> contexts_;
     std::unique_ptr<ShapeInferenceEngine> shape_inference_engine_;
 

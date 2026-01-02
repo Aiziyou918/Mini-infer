@@ -18,6 +18,13 @@ set(TEST_SOURCES
     test_kernel_registry.cpp
 )
 
+# Add CUDA tests if CUDA is enabled
+if(MINI_INFER_ENABLE_CUDA AND CUDAToolkit_FOUND)
+    list(APPEND TEST_SOURCES
+        test_cuda_kernels.cpp
+    )
+endif()
+
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
     
@@ -30,6 +37,7 @@ foreach(test_src ${TEST_SOURCES})
             mini_infer_operators
             mini_infer_graph_all
             mini_infer_runtime
+            mini_infer_kernels_all
             mini_infer_utils
             GTest::gtest_main
     )

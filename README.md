@@ -33,28 +33,43 @@ Mini-Infer/
 
 ## 快速开始 (Quick Start)
 
-### 1. 构建项目
-
-推荐使用 **Conan** 自动管理依赖（如 Protobuf）：
+### 1. 安装依赖
 
 ```bash
-# Windows (PowerShell) 一键构建
-.\build.ps1
+# 安装 Conan 包管理器
+pip install conan
 
-# Linux/macOS (Shell) 一键构建
-./build.sh
+# 检测默认配置
+conan profile detect --force
 ```
 
-或者手动使用 CMake：
+### 2. 构建项目
+
+使用 **Conan** 自动管理依赖并构建：
 
 ```bash
-mkdir build && cd build
-# 启用 ONNX 与 Profiling
-cmake .. -DMINI_INFER_ENABLE_ONNX=ON -DMINI_INFER_ENABLE_PROFILING=ON
-cmake --build . --config Release
+# Windows (PowerShell)
+# 步骤 1: 安装依赖并生成 CMake 预设
+conan install . --output-folder=build --build=missing -s build_type=Release
+
+# 步骤 2: 配置 CMake
+cmake --preset conan-release
+
+# 步骤 3: 编译
+cmake --build --preset conan-release
+
+# Linux/macOS (Bash)
+# 步骤 1: 安装依赖并生成 CMake 预设
+conan install . --output-folder=build --build=missing -s build_type=Release
+
+# 步骤 2: 配置 CMake
+cmake --preset conan-release
+
+# 步骤 3: 编译
+cmake --build --preset conan-release
 ```
 
-### 2. 运行示例 (Run Example)
+### 3. 运行示例 (Run Example)
 
 我们提供了一个 LeNet-5 的完整示例：
 
@@ -62,11 +77,11 @@ cmake --build . --config Release
 # Windows
 .\build\Release\bin\onnx_parser_example.exe .\models\python\lenet5\models\lenet5.onnx
 
-# Linux
-./build/bin/onnx_parser_example ./models/python/lenet5/models/lenet5.onnx
+# Linux/macOS
+./build/Release/bin/onnx_parser_example ./models/python/lenet5/models/lenet5.onnx
 ```
 
-### 3. C++ API 示例
+### 4. C++ API 示例
 
 ```cpp
 #include "mini_infer/runtime/engine.h"
@@ -94,7 +109,7 @@ int main() {
     auto input_tensor = core::Tensor::create({1, 3, 224, 224});
     // ... fill data ...
     
-    ctx->set_inputs({{"input", input_tensor}});
+    ctx->set_input("input", input_tensor);
     engine.execute(ctx.get()); // 零拷贝执行
 
     // 获取结果
@@ -102,17 +117,43 @@ int main() {
 }
 ```
 
-## 架构概览
+### 5. 构建选项
 
-查看 [ARCHITECTURE.md](docs/ARCHITECTURE.md) 获取详细的架构设计文档。
+Conan 提供了灵活的构建选项：
 
-## 贡献
+```bash
+# 启用 CUDA 支持
+conan install . --output-folder=build --build=missing \
+  -o enable_cuda=True \
+  -o cuda_toolkit_root="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3"
+
+# 禁用 ONNX 支持（减小二进制大小）
+conan install . --output-folder=build --build=missing \
+  -o enable_onnx=False
+
+# 禁用日志（生产环境优化）
+conan install . --output-folder=build --build=missing \
+  -o enable_logging=False
+```
+
+详细的构建选项请参考 [Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)。
+
+## 📚 文档
+
+- **[快速开始](QUICK_START.md)** - 快速上手指南
+- **[Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)** - 详细的 Conan 使用说明
+- **[CUDA 配置指南](docs/CUDA_CONAN_SETUP.md)** - CUDA 后端配置
+- **[架构设计](docs/ARCHITECTURE.md)** - 详细的架构设计文档
+- **[API 文档](docs/API.md)** - API 参考手册
+- **[入门教程](docs/GETTING_STARTED.md)** - 完整的入门教程
+
+## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！我们正在积极寻找以下贡献：
 - [ ] SIMD 优化 (AVX2/NEON) for CPU Kernels
 - [ ] CUDA Kernels 实现
 - [ ] 更多 ONNX 算子支持
 
-## 许可证
+## 📄 许可证
 
 MIT License

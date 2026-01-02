@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mini_infer/core/allocator.h"
+#include "mini_infer/backends/cpu/cpu_allocator.h"
 #include <cstddef>
 #include <cstring>
 
@@ -27,7 +28,7 @@ public:
      */
     explicit Buffer(size_t size, Allocator* allocator = nullptr)
         : size_(size)
-        , allocator_(allocator ? allocator : CPUAllocator::get_instance())
+        , allocator_(allocator ? allocator : backends::cpu::CPUAllocator::instance())
         , data_(nullptr) {
         
         if (size_ > 0) {

@@ -1,6 +1,7 @@
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/core/buffer.h"
 #include "mini_infer/core/allocator.h"
+#include "mini_infer/backends/cpu/cpu_allocator.h"
 #include "mini_infer/operators/conv2d.h"
 #include <iostream>
 #include <iomanip>
@@ -11,7 +12,7 @@ using namespace mini_infer;
  * @brief Print memory statistics
  */
 void print_memory_stats(const std::string& label) {
-    auto allocator = core::CPUAllocator::get_instance();
+    auto allocator = backends::cpu::CPUAllocator::instance();
     
     double current_mb = allocator->total_allocated() / 1024.0 / 1024.0;
     double peak_mb = allocator->peak_allocated() / 1024.0 / 1024.0;

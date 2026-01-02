@@ -163,7 +163,7 @@ void maxpool_dispatch(KernelContext* ctx) {
                                 static_cast<int>(input_shape[3]), static_cast<int>(output_shape[2]),
                                 static_cast<int>(output_shape[3]), param->kernel_h, param->kernel_w,
                                 param->stride_h, param->stride_w, param->padding_h,
-                                param->padding_w);
+                                param->padding_w, KernelBackend::CPU);
 }
 
 template <typename T>
@@ -195,7 +195,7 @@ void avgpool_dispatch(KernelContext* ctx) {
                                 static_cast<int>(input_shape[3]), static_cast<int>(output_shape[2]),
                                 static_cast<int>(output_shape[3]), param->kernel_h, param->kernel_w,
                                 param->stride_h, param->stride_w, param->padding_h,
-                                param->padding_w);
+                                param->padding_w, KernelBackend::CPU);
 }
 
 }  // namespace

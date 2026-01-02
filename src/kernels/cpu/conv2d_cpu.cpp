@@ -68,9 +68,10 @@ void conv2d_cpu_kernel(KernelContext* ctx) {
         kernels::Im2ColKernel::im2col<float>(
             input_n, col_buffer.data(), C_in, H_in, W_in, kernel_h, kernel_w, param->stride_h,
             param->stride_w, param->padding_h, param->padding_w, param->dilation_h,
-            param->dilation_w, H_out, W_out);
+            param->dilation_w, H_out, W_out, KernelBackend::CPU);
 
-        kernels::GEMMKernel::gemm_nn<float>(weight_data, col_buffer.data(), output_n, M, N_gemm, K);
+        kernels::GEMMKernel::gemm_nn<float>(weight_data, col_buffer.data(), output_n, M, N_gemm, K,
+                                             KernelBackend::CPU);
     }
 
     if (param->use_bias) {
@@ -78,7 +79,8 @@ void conv2d_cpu_kernel(KernelContext* ctx) {
         kernels::BiasKernel::add_channel_bias<float>(output_data, bias_data,
                                                      N,             // batch_size
                                                      C_out,         // channels
-                                                     H_out * W_out  // spatial_size
+                                                     H_out * W_out,  // spatial_size
+                                                     KernelBackend::CPU
         );
     }
 

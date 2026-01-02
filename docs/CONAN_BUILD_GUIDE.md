@@ -2,12 +2,18 @@
 
 本文档介绍如何使用 Conan 包管理器构建 Mini-Infer 项目。
 
+> **📌 相关文档:**
+> - [CUDA 配置指南](CUDA_CONAN_SETUP.md) - 如何启用 CUDA 支持
+> - [快速开始](../QUICK_START.md) - 快速上手指南
+> - [构建指南](BUILD.md) - 详细的构建说明
+
 ## 为什么选择 Conan？
 
 - ✅ **真正的跨平台**: 一套命令在 Windows/Linux/macOS 上都能工作
-- ✅ **自动依赖管理**: 自动下载、编译和配置所有依赖
+- ✅ **自动依赖管理**: 自动下载、编译和配置所有依赖（如 Protobuf）
 - ✅ **可重现构建**: 锁定依赖版本，确保构建一致性
-- ✅ **与 CMake 完美集成**: 自动生成工具链文件和依赖配置
+- ✅ **与 CMake 完美集成**: 自动生成 CMakePresets.json 和工具链文件
+- ✅ **灵活的选项系统**: 通过 Conan 选项控制功能开关（ONNX/CUDA/Logging）
 
 ## 前置要求
 
@@ -274,18 +280,31 @@ conan lock create . --lockfile=conan.lock
 conan install . --lockfile=conan.lock --build=missing
 ```
 
-## 与 vcpkg 的对比
 
-| 特性 | Conan | vcpkg |
-|------|-------|-------|
-| 跨平台命令 | ✅ 统一 | ⚠️ 平台相关 |
-| 二进制缓存 | ✅ 内置 | ⚠️ 需配置 |
-| 版本管理 | ✅ 灵活 | ⚠️ 有限 |
-| CMake 集成 | ✅ 自动 | ✅ 工具链 |
-| 学习曲线 | ⚠️ 中等 | ✅ 简单 |
+## CUDA 支持
+
+如需启用 CUDA 支持，请参考 [CUDA 配置指南](CUDA_CONAN_SETUP.md)。
+
+简要示例：
+
+```bash
+# Windows
+conan install . --output-folder=build --build=missing \
+  -o enable_cuda=True \
+  -o cuda_toolkit_root="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3"
+
+# Linux
+conan install . --output-folder=build --build=missing \
+  -o enable_cuda=True \
+  -o cuda_toolkit_root="/usr/local/cuda"
+
+cmake --preset conan-release
+cmake --build --preset conan-release
+```
 
 ## 参考资料
 
 - [Conan 官方文档](https://docs.conan.io/)
 - [Conan CMake 集成](https://docs.conan.io/2/reference/tools/cmake.html)
 - [CMakePresets.json 规范](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html)
+- [Mini-Infer CUDA 配置](CUDA_CONAN_SETUP.md)

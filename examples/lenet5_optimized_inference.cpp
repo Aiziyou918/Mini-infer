@@ -103,6 +103,10 @@ BenchmarkResult benchmark_engine(std::shared_ptr<runtime::InferencePlan> plan,
     int sample_index = 0;
     for (const auto& filepath : sample_files) {
         try {
+            if (verbose) {
+                std::cout << "[Sample " << sample_index << "] " << filepath.filename().string()
+                          << std::endl;
+            }
             // Load sample
             auto input_tensor = utils::load_mnist_sample(filepath.string());
 
@@ -121,6 +125,9 @@ BenchmarkResult benchmark_engine(std::shared_ptr<runtime::InferencePlan> plan,
                     std::cerr << "Error: Inference failed for " << filepath.filename() << std::endl;
                 }
                 continue;
+            }
+            if (verbose) {
+                std::cout << "  -> Execution succeeded" << std::endl;
             }
 
             // Get output

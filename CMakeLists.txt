@@ -57,27 +57,27 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 if(MSVC)
     # MSVC specific flags
     add_compile_options(
-        /W4          # Warning level 4
-        /WX-         # Warnings not as errors (remove - for strict)
-        /MP          # Multi-processor compilation
-        /permissive- # Standards conformance
-        /utf-8       # Treat source files as UTF-8 to avoid code page issues
+        $<$<COMPILE_LANGUAGE:CXX>:/W4>          # Warning level 4
+        $<$<COMPILE_LANGUAGE:CXX>:/WX->         # Warnings not as errors (remove - for strict)
+        $<$<COMPILE_LANGUAGE:CXX>:/MP>          # Multi-processor compilation
+        $<$<COMPILE_LANGUAGE:CXX>:/permissive-> # Standards conformance
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>       # Treat source files as UTF-8 to avoid code page issues
     )
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     add_definitions(-DNOMINMAX)
 else()
     # GCC/Clang flags
     add_compile_options(
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wno-unused-parameter
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-parameter>
     )
     
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g -O0)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-g> $<$<COMPILE_LANGUAGE:CXX>:-O0>)
     else()
-        add_compile_options(-O3 -march=native)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CXX>:-march=native>)
     endif()
 endif()
 
@@ -113,11 +113,64 @@ if(MINI_INFER_BUILD_TESTS)
     endif()
 endif()
 
-# CUDA support (future)
+# CUDA support
 if(MINI_INFER_ENABLE_CUDA)
     enable_language(CUDA)
-    find_package(CUDA REQUIRED)
-    add_definitions(-DMINI_INFER_CUDA_ENABLED)
+    find_package(CUDAToolkit REQUIRED)
+
+    if(CUDAToolkit_FOUND)
+        message(STATUS "Found CUDA: ${CUDAToolkit_VERSION}")
+        message(STATUS "CUDA Include: ${CUDAToolkit_INCLUDE_DIRS}")
+        message(STATUS "CUDA Libraries: ${CUDAToolkit_LIBRARY_DIR}")
+
+        # Find cuDNN manually (not provided by CUDAToolkit)
+        find_library(CUDNN_LIBRARY cudnn
+            HINTS ${CUDAToolkit_LIBRARY_DIR}
+            PATH_SUFFIXES lib lib64
+        )
+        
+        find_path(CUDNN_INCLUDE_DIR cudnn.h
+            HINTS ${CUDAToolkit_INCLUDE_DIRS}
+            PATH_SUFFIXES include
+        )
+
+        if(CUDNN_LIBRARY AND CUDNN_INCLUDE_DIR)
+            message(STATUS "Found cuDNN: ${CUDNN_LIBRARY}")
+            message(STATUS "cuDNN Include: ${CUDNN_INCLUDE_DIR}")
+            
+            # Create imported target for cuDNN
+            add_library(CUDA::cudnn UNKNOWN IMPORTED)
+            set_target_properties(CUDA::cudnn PROPERTIES
+                IMPORTED_LOCATION "${CUDNN_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${CUDNN_INCLUDE_DIR}"
+            )
+        else()
+            message(WARNING "cuDNN not found. Conv2D CUDA kernel will not be available.")
+        endif()
+
+        # Set CUDA compilation options (match C++ standard)
+        set(CMAKE_CUDA_STANDARD 17)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+        # Set CUDA architectures (Turing, Ampere, Ada)
+        if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+            set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89)
+        endif()
+
+        # CUDA compiler flags
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")
+        else()
+            set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math")
+        endif()
+
+        # Note: MINI_INFER_USE_CUDA is defined per-target in backends/CMakeLists.txt
+        # to avoid forcing all modules to include CUDA headers
+        message(STATUS "CUDA support enabled")
+    else()
+        message(WARNING "CUDA not found. CUDA support will be disabled.")
+        set(MINI_INFER_ENABLE_CUDA OFF)
+    endif()
 endif()
 
 # ONNX Support (Auto Configuration)
@@ -237,4 +290,3 @@ message(STATUS "Enable Profiling:  ${MINI_INFER_ENABLE_PROFILING}")
 message(STATUS "Enable Logging:    ${MINI_INFER_ENABLE_LOGGING}")
 message(STATUS "========================================")
 message(STATUS "")
-

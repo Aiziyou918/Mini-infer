@@ -19,6 +19,13 @@ target_link_libraries(mini_infer_core
         Threads::Threads
 )
 
+# Add CUDA support if enabled
+if(MINI_INFER_ENABLE_CUDA AND CUDAToolkit_FOUND)
+    target_compile_definitions(mini_infer_core PUBLIC MINI_INFER_USE_CUDA)
+    target_include_directories(mini_infer_core PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(mini_infer_core PUBLIC CUDA::cudart CUDA::cuda_driver)
+endif()
+
 # Set library properties
 set_target_properties(mini_infer_core PROPERTIES
     VERSION ${PROJECT_VERSION}

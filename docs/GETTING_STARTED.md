@@ -4,9 +4,24 @@
 
 ## 1. 准备工作
 
-确保你已经成功构建了项目。
-- Windows: `.\build.ps1`
-- Linux: `./build.sh`
+### 安装 Conan 并构建项目
+
+```bash
+# 1. 安装 Conan
+pip install conan
+
+# 2. 检测配置
+conan profile detect --force
+
+# 3. 安装依赖并生成预设
+conan install . --output-folder=build --build=missing -s build_type=Debug
+
+# 4. 配置并编译
+cmake --preset conan-debug
+cmake --build --preset conan-debug
+```
+
+详细的构建说明请参考 [构建指南](BUILD.md) 或 [快速开始](../QUICK_START.md)。
 
 ## 2. 核心概念
 

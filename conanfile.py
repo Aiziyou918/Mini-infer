@@ -16,12 +16,14 @@ class MiniInferRecipe(ConanFile):
     options = {
         "enable_onnx": [True, False],
         "enable_logging": [True, False],
-        "enable_cuda": [True, False]
+        "enable_cuda": [True, False],
+        "cuda_toolkit_root": ["ANY"]  # CUDA Toolkit 安装路径
     }
     default_options = {
         "enable_onnx": True,
         "enable_logging": True,
-        "enable_cuda": False
+        "enable_cuda": True,
+        "cuda_toolkit_root": ""  # 空字符串表示使用系统默认路径
     }
     
     # CMake generator (CMakeToolchain will be configured in generate() method)
@@ -47,6 +49,7 @@ class MiniInferRecipe(ConanFile):
     def generate(self):
         # Configure CMakeToolchain to pass options as CMake variables
         from conan.tools.cmake import CMakeToolchain
+        import os
         
         tc = CMakeToolchain(self)
         
@@ -54,6 +57,21 @@ class MiniInferRecipe(ConanFile):
         tc.cache_variables["MINI_INFER_ENABLE_ONNX"] = "ON" if self.options.enable_onnx else "OFF"
         tc.cache_variables["MINI_INFER_ENABLE_LOGGING"] = "ON" if self.options.enable_logging else "OFF"
         tc.cache_variables["MINI_INFER_ENABLE_CUDA"] = "ON" if self.options.enable_cuda else "OFF"
+        
+        # 配置 CUDA 路径
+        if self.options.enable_cuda:
+            # 如果用户指定了 CUDA 路径，使用用户指定的路径
+            if self.options.cuda_toolkit_root and str(self.options.cuda_toolkit_root):
+                cuda_path = str(self.options.cuda_toolkit_root)
+                tc.cache_variables["CUDAToolkit_ROOT"] = cuda_path
+                tc.cache_variables["CMAKE_CUDA_COMPILER"] = os.path.join(cuda_path, "bin", "nvcc.exe" if self.settings.os == "Windows" else "bin/nvcc")
+                
+                # 设置环境变量，确保 CMake 能找到 CUDA
+                tc.variables["CUDA_TOOLKIT_ROOT_DIR"] = cuda_path
+                tc.variables["CUDA_PATH"] = cuda_path
+            
+            # 启用 CUDA 语言支持
+            tc.cache_variables["CMAKE_CUDA_ARCHITECTURES"] = "75;80;86;89"  # 支持的 CUDA 架构
         
         # Generate the toolchain file and CMakePresets.json
         tc.generate()

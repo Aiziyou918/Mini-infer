@@ -14,6 +14,23 @@ set(KERNEL_SOURCES
     cpu/softmax_cpu.cpp
 )
 
+# Add CUDA kernels if CUDA is enabled
+if(MINI_INFER_ENABLE_CUDA AND CUDAToolkit_FOUND)
+    list(APPEND KERNEL_SOURCES
+        cuda/relu_cuda.cu
+        cuda/conv2d_cuda.cu
+        cuda/gemm_cuda.cu
+        cuda/im2col_cuda.cu
+        cuda/bias_cuda.cu
+        cuda/linear_cuda.cu
+        cuda/pooling_cuda.cu
+        cuda/softmax_cuda.cu
+        cuda/flatten_cuda.cu
+        cuda/reshape_cuda.cu
+        cuda/transpose_cuda.cu
+    )
+endif()
+
 add_library(mini_infer_kernels STATIC ${KERNEL_SOURCES})
 
 target_include_directories(mini_infer_kernels
@@ -26,6 +43,28 @@ target_link_libraries(mini_infer_kernels
     PUBLIC
         mini_infer_core
 )
+
+# Add CUDA support if enabled
+if(MINI_INFER_ENABLE_CUDA AND CUDAToolkit_FOUND)
+    target_compile_definitions(mini_infer_kernels PUBLIC MINI_INFER_USE_CUDA)
+    target_include_directories(mini_infer_kernels PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(mini_infer_kernels PUBLIC 
+        CUDA::cudart 
+        CUDA::cuda_driver
+        CUDA::cublas
+    )
+    
+    # Link cuDNN if available
+    if(TARGET CUDA::cudnn)
+        target_link_libraries(mini_infer_kernels PUBLIC CUDA::cudnn)
+    endif()
+    
+    # Set CUDA properties for .cu files
+    set_target_properties(mini_infer_kernels PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    )
+endif()
 
 # Interface alias to keep kernel registry TU linked in static builds
 add_library(mini_infer_kernels_all INTERFACE)
@@ -40,15 +79,6 @@ target_link_libraries(mini_infer_kernels_all
 if (NOT BUILD_SHARED_LIBS AND MSVC)
     target_link_options(mini_infer_kernels_all INTERFACE "/WHOLEARCHIVE:mini_infer_kernels")
 endif()
-
-# Future: Add CUDA kernels conditionally
-# if(USE_CUDA)
-#     enable_language(CUDA)
-#     target_sources(mini_infer_kernels PRIVATE
-#         cuda/gemm_cuda.cu
-#         cuda/im2col_cuda.cu
-#     )
-# endif()
 
 # Set library properties
 set_target_properties(mini_infer_kernels PROPERTIES

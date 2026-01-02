@@ -57,12 +57,14 @@ void linear_cpu_kernel(KernelContext* ctx) {
         float* output_data = static_cast<float*>(output->data());
 
         GEMMKernel::gemm_nt<float>(input_data, weight_data, output_data,
-                                   batch_size, out_features, in_features);
+                                   batch_size, out_features, in_features,
+                                   KernelBackend::CPU);
 
         if (param->use_bias) {
             const float* bias_data = static_cast<const float*>(inputs[2]->data());
             BiasKernel::add_channel_bias<float>(output_data, bias_data,
-                                                batch_size, out_features, 1);
+                                                batch_size, out_features, 1,
+                                                KernelBackend::CPU);
         }
     } else if (dtype == core::DataType::INT32) {
         const int32_t* input_data = static_cast<const int32_t*>(input->data());
@@ -70,12 +72,13 @@ void linear_cpu_kernel(KernelContext* ctx) {
         int32_t* output_data = static_cast<int32_t*>(output->data());
 
         GEMMKernel::gemm_nt<int32_t>(input_data, weight_data, output_data,
-                                     batch_size, out_features, in_features);
+                                     batch_size, out_features, in_features,
+                                     KernelBackend::CPU);
 
         if (param->use_bias) {
             const int32_t* bias_data = static_cast<const int32_t*>(inputs[2]->data());
             BiasKernel::add_channel_bias<int32_t>(output_data, bias_data,
-                                                  batch_size, out_features, 1);
+                                                  batch_size, out_features, 1, KernelBackend::CPU);
         }
     }
 }

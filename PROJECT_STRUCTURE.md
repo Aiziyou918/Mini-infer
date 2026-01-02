@@ -7,18 +7,25 @@
 ```
 Mini-Infer/
 ├── CMakeLists.txt          # 顶层 CMake 配置文件
-├── CMakePresets.json       # CMake 预设配置
+├── CMakeUserPresets.json   # 用户自定义 CMake 预设（可选）
+├── conanfile.py            # Conan 包配置文件
 ├── README.md               # 项目说明文档
+├── QUICK_START.md          # 快速开始指南
 ├── LICENSE                 # MIT 许可证
-├── CONTRIBUTING.md         # 贡献指南
 ├── PROJECT_STRUCTURE.md    # 本文件
-├── build.ps1               # Windows 一键构建脚本
-├── build.sh                # Linux/macOS 一键构建脚本
 ├── include/                # 公共头文件目录
 ├── src/                    # 源代码实现目录
 ├── tests/                  # 测试代码目录
 ├── examples/               # 示例代码目录
-└── docs/                   # 文档目录
+├── docs/                   # 文档目录
+├── models/                 # 模型文件和训练脚本
+└── build/                  # 构建目录（由 Conan 生成）
+    ├── Debug/              # Debug 构建
+    ├── Release/            # Release 构建
+    └── generators/         # Conan 生成的文件
+        ├── CMakePresets.json      # 自动生成的 CMake 预设
+        ├── conan_toolchain.cmake  # Conan 工具链
+        └── CMakeDeps.cmake        # 依赖配置
 ```
 
 ## include/ - 头文件目录

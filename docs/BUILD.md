@@ -1,103 +1,132 @@
 # Mini-Infer 构建指南
 
+本文档详细说明如何使用 Conan 包管理器构建 Mini-Infer 项目。
+
+---
+
 ## 系统要求
+
+### 通用要求
+- **CMake** 3.18 或更高版本
+- **Conan** 2.0 或更高版本
+- **Python** 3.7+ (用于安装 Conan)
+- **C++17** 兼容的编译器
 
 ### Windows
 - Visual Studio 2017 或更高版本（推荐 VS 2022）
-- CMake 3.18+
-- PowerShell
+- PowerShell 5.0+
 
 ### Linux
 - GCC 7+ 或 Clang 5+
-- CMake 3.18+
 - Make 或 Ninja
 
 ### macOS
 - Xcode 10+
-- CMake 3.18+
-- Make 或 Ninja
+- Command Line Tools
+
+---
+
+## 安装 Conan
+
+### 使用 pip 安装（推荐）
+
+```bash
+# 安装 Conan
+pip install conan
+
+# 验证安装
+conan --version
+
+# 检测默认配置
+conan profile detect --force
+```
+
+### 使用系统包管理器
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install python3-pip
+pip3 install conan
+
+# macOS (Homebrew)
+brew install conan
+
+# Arch Linux
+sudo pacman -S conan
+```
+
+---
 
 ## 快速构建
 
-### Windows
-
-使用提供的 PowerShell 脚本：
-
-```powershell
-# Release 构建
-.\build.ps1
-
-# Debug 构建
-.\build.ps1 -BuildType Debug
-
-# 清理并构建
-.\build.ps1 -Clean
-
-# 构建并运行测试
-.\build.ps1 -Test
-
-# 完整构建流程
-.\build.ps1 -Clean -Test
-```
-
-手动构建：
-
-```powershell
-mkdir build
-cd build
-cmake ..
-cmake --build . --config Release
-```
-
-### Linux/macOS
-
-使用提供的 Shell 脚本：
+### 三步构建流程
 
 ```bash
-# 添加执行权限（首次）
-chmod +x build.sh
+# 步骤 1: 安装依赖并生成 CMake 预设
+conan install . --output-folder=build --build=missing -s build_type=Release
 
-# Release 构建
-./build.sh
+# 步骤 2: 配置 CMake
+cmake --preset conan-release
 
-# Debug 构建
-./build.sh --debug
-
-# 清理并构建
-./build.sh --clean
-
-# 构建并运行测试
-./build.sh --test
-
-# 指定并行任务数
-./build.sh --jobs 8
-
-# 完整构建流程
-./build.sh --clean --test --release
+# 步骤 3: 编译
+cmake --build --preset conan-release
 ```
 
-手动构建：
+### Debug 构建
 
 ```bash
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
+# 步骤 1: 安装依赖
+conan install . --output-folder=build --build=missing -s build_type=Debug
+
+# 步骤 2: 配置
+cmake --preset conan-debug
+
+# 步骤 3: 编译
+cmake --build --preset conan-debug
 ```
+
+---
+
+## 构建选项
+
+### Conan 选项
+
+Mini-Infer 提供以下 Conan 选项：
+
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enable_onnx` | bool | `True` | 启用 ONNX 模型导入支持 |
+| `enable_logging` | bool | `True` | 启用日志输出 |
+| `enable_cuda` | bool | `False` | 启用 CUDA GPU 加速 |
+| `cuda_toolkit_root` | string | `""` | CUDA Toolkit 安装路径 |
+
+### 使用示例
+
+```bash
+# 完整功能构建（默认）
+conan install . --output-folder=build --build=missing \
+  -s build_type=Release \
+  -o enable_onnx=True \
+  -o enable_logging=True
+
+# 最小化构建（无 ONNX，无日志）
+conan install . --output-folder=build --build=missing \
+  -s build_type=Release \
+  -o enable_onnx=False \
+  -o enable_logging=False
+
+# 启用 CUDA 支持
+conan install . --output-folder=build --build=missing \
+  -s build_type=Release \
+  -o enable_cuda=True \
+  -o cuda_toolkit_root="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3"
+```
+
+---
 
 ## CMake 配置选项
 
-### 基础选项
-
-```bash
-# 指定构建类型
--DCMAKE_BUILD_TYPE=Release|Debug
-
-# 指定安装路径
--DCMAKE_INSTALL_PREFIX=/path/to/install
-```
-
-### Mini-Infer 特定选项
+除了 Conan 选项外，还可以通过 CMake 变量进行配置：
 
 ```bash
 # 是否构建测试（默认 ON）
@@ -109,131 +138,161 @@ make -j$(nproc)
 # 是否构建共享库（默认 ON）
 -DMINI_INFER_BUILD_SHARED_LIBS=ON|OFF
 
-# 是否启用 CUDA 支持（默认 OFF，未来支持）
--DMINI_INFER_ENABLE_CUDA=ON|OFF
-
 # 是否启用性能分析（默认 ON）
 -DMINI_INFER_ENABLE_PROFILING=ON|OFF
-
-# 是否启用日志（默认 ON）
--DMINI_INFER_ENABLE_LOGGING=ON|OFF
 ```
 
-### 示例配置
+这些选项会在 `cmake --preset` 时自动从 Conan 传递。
 
-完整的开发配置：
-
-```bash
-cmake .. \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DMINI_INFER_BUILD_TESTS=ON \
-  -DMINI_INFER_BUILD_EXAMPLES=ON \
-  -DMINI_INFER_ENABLE_PROFILING=ON \
-  -DMINI_INFER_ENABLE_LOGGING=ON
-```
-
-生产环境配置：
-
-```bash
-cmake .. \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DMINI_INFER_BUILD_TESTS=OFF \
-  -DMINI_INFER_BUILD_EXAMPLES=OFF \
-  -DMINI_INFER_ENABLE_LOGGING=OFF
-```
+---
 
 ## 使用 CMake Presets
 
-项目提供了 `CMakePresets.json` 文件，支持预定义配置：
+Conan 会自动生成 `build/generators/CMakePresets.json`，包含以下预设：
 
-### Windows
+### 查看可用预设
 
-```powershell
-# 配置
-cmake --preset windows-release
+```bash
+# 查看所有预设
+cmake --list-presets
 
-# 构建
-cmake --build --preset windows-release
-
-# 测试
-ctest --preset windows-release
+# 输出示例：
+# Available configure presets:
+#   "conan-debug"    - Debug build
+#   "conan-release"  - Release build
 ```
 
-### Linux
+### 使用预设
 
 ```bash
 # 配置
-cmake --preset linux-release
+cmake --preset conan-release
 
 # 构建
-cmake --build --preset linux-release
+cmake --build --preset conan-release
 
 # 测试
-ctest --preset linux-release
+ctest --preset conan-release
+
+# 安装
+cmake --build --preset conan-release --target install
 ```
+
+---
+
+## 高级构建配置
+
+### 使用 Ninja 生成器（提升编译速度）
+
+```bash
+# 安装 Ninja
+pip install ninja
+
+# 配置 Conan 使用 Ninja
+conan install . --output-folder=build --build=missing \
+  -c tools.cmake.cmaketoolchain:generator=Ninja
+
+# 构建（Ninja 会自动并行）
+cmake --preset conan-release
+cmake --build --preset conan-release
+```
+
+### 并行编译
+
+```bash
+# 使用多核编译（8 个并行任务）
+cmake --build --preset conan-release -j8
+
+# 使用所有可用核心
+cmake --build --preset conan-release -j$(nproc)  # Linux
+cmake --build --preset conan-release -j$env:NUMBER_OF_PROCESSORS  # Windows PowerShell
+```
+
+### 指定编译器
+
+```bash
+# 使用特定编译器
+conan install . --output-folder=build --build=missing \
+  -s compiler=gcc \
+  -s compiler.version=11
+
+# 或通过环境变量
+export CC=gcc-11
+export CXX=g++-11
+conan install . --output-folder=build --build=missing
+```
+
+---
 
 ## 运行测试
 
-构建完成后运行测试：
+### 使用 CTest
 
 ```bash
-cd build
-
 # 运行所有测试
-ctest
+ctest --preset conan-debug
 
 # 详细输出
-ctest --output-on-failure
-
-# 运行特定测试
-ctest -R test_tensor
+ctest --preset conan-debug --output-on-failure
 
 # 并行运行测试
-ctest -j4
+ctest --preset conan-debug -j8
+
+# 运行特定测试
+ctest --preset conan-debug -R test_tensor
 ```
 
-或直接运行测试可执行文件：
+### 直接运行测试可执行文件
 
 ```bash
 # Windows
-.\bin\Release\test_tensor.exe
-.\bin\Release\test_backend.exe
-.\bin\Release\test_graph.exe
+.\build\Debug\bin\test_tensor.exe
+.\build\Debug\bin\test_backend.exe
 
 # Linux/macOS
-./bin/test_tensor
-./bin/test_backend
-./bin/test_graph
+./build/Debug/bin/test_tensor
+./build/Debug/bin/test_backend
 ```
+
+---
 
 ## 运行示例
 
 ```bash
 # Windows
-.\bin\Release\simple_inference.exe
-.\bin\Release\build_graph.exe
+.\build\Release\bin\onnx_parser_example.exe .\models\python\lenet5\models\lenet5.onnx
 
 # Linux/macOS
-./bin/simple_inference
-./bin/build_graph
+./build/Release/bin/onnx_parser_example ./models/python/lenet5/models/lenet5.onnx
 ```
+
+---
 
 ## 安装
 
+### 安装到默认位置
+
 ```bash
-cd build
+# 使用预设安装
+cmake --build --preset conan-release --target install
 
-# 安装到默认位置
+# 或手动指定
+cd build/Release
 cmake --install .
-
-# 安装到指定位置
-cmake --install . --prefix /path/to/install
-
-# Windows 需要指定配置
-cmake --install . --config Release
 ```
 
-安装后的目录结构：
+### 安装到自定义位置
+
+```bash
+# 配置时指定安装前缀
+cmake --preset conan-release -DCMAKE_INSTALL_PREFIX=/path/to/install
+
+# 构建并安装
+cmake --build --preset conan-release
+cmake --install build/Release --prefix /path/to/install
+```
+
+### 安装后的目录结构
 
 ```
 install/
@@ -244,155 +303,282 @@ install/
 │       ├── operators/
 │       ├── graph/
 │       ├── runtime/
+│       ├── importers/
 │       └── utils/
 ├── lib/
 │   ├── libmini_infer_core.a
 │   ├── libmini_infer_backends.a
-│   └── ...
+│   ├── libmini_infer_operators.a
+│   ├── libmini_infer_graph.a
+│   ├── libmini_infer_runtime.a
+│   ├── libmini_infer_importers.a
+│   └── libmini_infer_utils.a
 └── lib/cmake/Mini-Infer/
+    ├── Mini-InferConfig.cmake
     └── Mini-InferTargets.cmake
 ```
 
+---
+
 ## 在自己的项目中使用
 
-### 使用 CMake
+### 方式 1: 使用 find_package
 
 ```cmake
-# 方式 1: find_package
+cmake_minimum_required(VERSION 3.18)
+project(MyProject)
+
+# 查找 Mini-Infer
 find_package(Mini-Infer REQUIRED)
-target_link_libraries(your_target PRIVATE MiniInfer::mini_infer_runtime)
 
-# 方式 2: add_subdirectory
+# 链接库
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE 
+    MiniInfer::mini_infer_runtime
+    MiniInfer::mini_infer_importers
+)
+```
+
+### 方式 2: 使用 add_subdirectory
+
+```cmake
+cmake_minimum_required(VERSION 3.18)
+project(MyProject)
+
+# 添加 Mini-Infer 子目录
 add_subdirectory(path/to/Mini-Infer)
-target_link_libraries(your_target PRIVATE mini_infer_runtime)
+
+# 链接库
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE 
+    mini_infer_runtime
+    mini_infer_importers
+)
 ```
 
-### 手动链接
+### 方式 3: 使用 Conan 依赖
 
-```bash
-g++ your_app.cpp \
-  -I/path/to/Mini-Infer/include \
-  -L/path/to/Mini-Infer/build/lib \
-  -lmini_infer_runtime \
-  -lmini_infer_graph \
-  -lmini_infer_operators \
-  -lmini_infer_backends \
-  -lmini_infer_core \
-  -lmini_infer_utils \
-  -lpthread
+创建 `conanfile.txt`:
+
+```ini
+[requires]
+mini-infer/0.1.0
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[options]
+mini-infer/*:enable_onnx=True
 ```
+
+然后在 CMakeLists.txt 中：
+
+```cmake
+find_package(mini-infer REQUIRED)
+target_link_libraries(my_app PRIVATE mini-infer::mini-infer)
+```
+
+---
 
 ## 常见问题
 
-### 问题 1: CMake 版本太低
+### 问题 1: Conan 找不到 profile
 
+**症状:**
 ```
-CMake 3.18 or higher is required
+ERROR: Conan profile not found
 ```
 
-**解决方案**: 升级 CMake
-
+**解决方案:**
 ```bash
-# Ubuntu
-sudo apt-get install cmake
-
-# 或从官网下载最新版本
-# https://cmake.org/download/
+conan profile detect --force
 ```
 
-### 问题 2: 找不到编译器
+### 问题 2: 依赖下载失败
 
-**Windows**: 确保安装了 Visual Studio 并添加到 PATH
+**症状:**
+```
+ERROR: Failed to download protobuf/3.21.12
+```
 
-**Linux**: 安装 GCC 或 Clang
-
+**解决方案:**
 ```bash
-sudo apt-get install build-essential  # Ubuntu
-sudo yum groupinstall "Development Tools"  # CentOS
+# 清理缓存重试
+conan remove "*" -c
+conan install . --output-folder=build --build=missing
 ```
 
-### 问题 3: 链接错误
+### 问题 3: CMake 找不到预设
 
-确保按正确顺序链接库：
-
+**症状:**
 ```
-mini_infer_runtime
-mini_infer_graph
-mini_infer_operators
-mini_infer_backends
-mini_infer_core
-mini_infer_utils
+CMake Error: No such preset in CMakePresets.json: 'conan-release'
 ```
 
-### 问题 4: 头文件找不到
+**解决方案:**
+确保先运行了 `conan install`：
+```bash
+# 步骤 1: 生成预设
+conan install . --output-folder=build --build=missing
 
-确保包含正确的头文件路径：
-
-```cpp
-#include "mini_infer/mini_infer.h"  // 正确
-// 而不是
-#include "mini_infer.h"  // 错误
+# 步骤 2: 使用预设
+cmake --preset conan-release
 ```
+
+### 问题 4: 编译器版本不兼容
+
+**症状:**
+```
+ERROR: Compiler version not supported
+```
+
+**解决方案:**
+更新 Conan profile：
+```bash
+# 编辑 profile
+conan profile show default
+
+# 或创建新 profile
+conan profile detect --force
+```
+
+### 问题 5: 链接错误
+
+**症状:**
+```
+undefined reference to ...
+```
+
+**解决方案:**
+确保链接顺序正确：
+```cmake
+target_link_libraries(your_target PRIVATE
+    mini_infer_runtime      # 最上层
+    mini_infer_importers
+    mini_infer_graph
+    mini_infer_operators
+    mini_infer_backends
+    mini_infer_core         # 最底层
+    mini_infer_utils
+)
+```
+
+---
 
 ## 性能优化
 
 ### Release 构建优化
 
-确保使用 Release 模式：
-
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release ..
+# 使用 Release 模式
+conan install . --output-folder=build --build=missing -s build_type=Release
+
+# 禁用日志（生产环境）
+conan install . --output-folder=build --build=missing \
+  -s build_type=Release \
+  -o enable_logging=False
 ```
 
-### GCC/Clang 额外优化
+### 编译器优化标志
+
+Conan 会自动根据 build_type 设置优化标志：
+
+- **Debug**: `-g -O0`
+- **Release**: `-O3 -DNDEBUG`
+- **RelWithDebInfo**: `-O2 -g -DNDEBUG`
+- **MinSizeRel**: `-Os -DNDEBUG`
+
+如需自定义：
 
 ```bash
-cmake .. \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_FLAGS="-O3 -march=native -mtune=native"
+# GCC/Clang
+conan install . --output-folder=build --build=missing \
+  -c tools.cmake.cmaketoolchain:extra_cxxflags="-march=native -mtune=native"
+
+# MSVC
+conan install . --output-folder=build --build=missing \
+  -c tools.cmake.cmaketoolchain:extra_cxxflags="/O2 /Ob2 /GL"
 ```
 
-### MSVC 额外优化
-
-```bash
-cmake .. \
-  -DCMAKE_CXX_FLAGS="/O2 /Ob2 /Oi /Ot /GL"
-```
+---
 
 ## 清理
 
+### 清理构建目录
+
 ```bash
-# 清理构建目录
+# 删除整个构建目录
 rm -rf build/
 
-# 或使用构建脚本
-./build.sh --clean       # Linux/macOS
-.\build.ps1 -Clean       # Windows
+# Windows PowerShell
+Remove-Item -Recurse -Force build\
 ```
 
-## 持续集成
+### 清理 Conan 缓存
 
-项目可以轻松集成到 CI/CD 流程：
+```bash
+# 清理所有缓存
+conan remove "*" -c
+
+# 清理特定包
+conan remove "protobuf/*" -c
+```
+
+---
+
+## 持续集成
 
 ### GitHub Actions 示例
 
 ```yaml
-- name: Configure
-  run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+name: Build
 
-- name: Build
-  run: cmake --build build --parallel
+on: [push, pull_request]
 
-- name: Test
-  run: cd build && ctest --output-on-failure
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Conan
+      run: pip install conan
+    
+    - name: Detect Conan profile
+      run: conan profile detect --force
+    
+    - name: Install dependencies
+      run: conan install . --output-folder=build --build=missing -s build_type=Release
+    
+    - name: Configure
+      run: cmake --preset conan-release
+    
+    - name: Build
+      run: cmake --build --preset conan-release -j$(nproc)
+    
+    - name: Test
+      run: ctest --preset conan-release --output-on-failure
 ```
+
+---
 
 ## 获取帮助
 
 如果遇到构建问题，请：
 
-1. 查看 CMake 输出的错误信息
+1. 查看 CMake 和 Conan 的输出信息
 2. 确认系统要求是否满足
-3. 查看 [GitHub Issues](https://github.com/your-repo/Mini-Infer/issues)
-4. 提交新的 Issue 并附上完整的错误日志
+3. 查看 [Conan 文档](https://docs.conan.io/)
+4. 查看 [GitHub Issues](https://github.com/your-repo/Mini-Infer/issues)
+5. 提交新的 Issue 并附上完整的错误日志
 
+---
+
+## 相关文档
+
+- **[快速开始](../QUICK_START.md)** - 快速上手指南
+- **[Conan 构建指南](CONAN_BUILD_GUIDE.md)** - Conan 详细使用说明
+- **[CUDA 配置指南](CUDA_CONAN_SETUP.md)** - CUDA 后端配置
+- **[入门教程](GETTING_STARTED.md)** - 完整的入门教程

@@ -8,6 +8,10 @@
 
 #include "mini_infer/core/allocator.h"
 
+#ifdef MINI_INFER_USE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 namespace mini_infer {
 namespace core {
 
@@ -93,7 +97,16 @@ void Storage::reset(size_t capacity_bytes, DeviceType device, size_t alignment) 
     buffer_.reset(ptr, [allocator](void* p) {
         allocator->deallocate(p);
     });
-    std::memset(ptr, 0, aligned_bytes);
+
+    // Zero-initialize memory based on device type
+#ifdef MINI_INFER_USE_CUDA
+    if (device == DeviceType::CUDA) {
+        cudaMemset(ptr, 0, aligned_bytes);
+    } else
+#endif
+    {
+        std::memset(ptr, 0, aligned_bytes);
+    }
     capacity_ = aligned_bytes;
 }
 
@@ -200,7 +213,14 @@ void Tensor::ensure_contiguous_storage(size_t new_size_bytes) {
     if (storage_ && storage_->data()) {
         size_t copy_size = std::min(size_in_bytes(), new_size_bytes);
         if (copy_size > 0) {
-            std::memcpy(new_storage->data(), data(), copy_size);
+#ifdef MINI_INFER_USE_CUDA
+            if (device_ == DeviceType::CUDA) {
+                cudaMemcpy(new_storage->data(), data(), copy_size, cudaMemcpyDeviceToDevice);
+            } else
+#endif
+            {
+                std::memcpy(new_storage->data(), data(), copy_size);
+            }
         }
     }
 
@@ -219,7 +239,14 @@ void Tensor::resize(const Shape& new_shape) {
     if (storage_ && storage_->data() && new_size > old_size) {
         auto ptr = static_cast<uint8_t*>(data());
         if (ptr) {
-            std::memset(ptr + old_size, 0, new_size - old_size);
+#ifdef MINI_INFER_USE_CUDA
+            if (device_ == DeviceType::CUDA) {
+                cudaMemset(ptr + old_size, 0, new_size - old_size);
+            } else
+#endif
+            {
+                std::memset(ptr + old_size, 0, new_size - old_size);
+            }
         }
     }
 }
