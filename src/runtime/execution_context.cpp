@@ -368,12 +368,21 @@ core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& 
                 return core::Status::SUCCESS;
             }
 
+            // TensorRT-style: First check if weight was preloaded at build time
+            auto preloaded = plan_->get_gpu_tensor(tensor.get());
+            if (preloaded) {
+                tensor = preloaded;
+                return core::Status::SUCCESS;
+            }
+
+            // Fallback: Check local cache (for dynamically created tensors)
             auto cache_it = gpu_constant_cache_.find(tensor.get());
             if (cache_it != gpu_constant_cache_.end() && cache_it->second) {
                 tensor = cache_it->second;
                 return core::Status::SUCCESS;
             }
 
+            // Last resort: Copy to GPU at runtime (should be rare with TensorRT-style preloading)
             auto gpu_tensor = std::make_shared<core::Tensor>(
                 tensor->shape(), tensor->dtype(), core::DeviceType::CUDA);
             size_t size_bytes = tensor->size_in_bytes();

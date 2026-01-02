@@ -8,6 +8,7 @@
 
 #ifdef MINI_INFER_USE_CUDA
 #include <cuda_runtime.h>
+#include "mini_infer/backends/cuda/cuda_allocator.h"
 #endif
 
 namespace mini_infer {
@@ -84,6 +85,18 @@ core::Status InferencePlan::build(std::shared_ptr<graph::Graph> graph) {
         }
     } else {
         MI_LOG_INFO("[InferencePlan] Step 4: Memory planning disabled");
+    }
+
+    // Step 5: Preload weights to GPU (TensorRT-style)
+    if (config_.device_type == core::DeviceType::CUDA) {
+        MI_LOG_INFO("[InferencePlan] Step 5: Preloading weights to GPU...");
+        status = preload_weights_to_gpu();
+        if (status != core::Status::SUCCESS) {
+            MI_LOG_ERROR("[InferencePlan] Failed to preload weights to GPU");
+            return status;
+        }
+    } else {
+        MI_LOG_INFO("[InferencePlan] Step 5: Skipping GPU weight preload (CPU mode)");
     }
 
     MI_LOG_INFO("[InferencePlan] ========================================");
@@ -615,6 +628,9 @@ core::Status InferencePlan::bind_ordered_inputs(
             }
 
             // Copy data from CPU to GPU
+            // Note: cudaMemcpy is synchronous on the host but may not synchronize with
+            // non-blocking streams. Use cudaDeviceSynchronize to ensure data is ready
+            // before kernels on custom streams access it.
             size_t size_bytes = tensor->size_in_bytes();
             cudaError_t status = cudaMemcpy(outputs[0]->data(), tensor->data(), size_bytes, cudaMemcpyHostToDevice);
             if (status != cudaSuccess) {
@@ -622,6 +638,8 @@ core::Status InferencePlan::bind_ordered_inputs(
                              "' to GPU: " + std::string(cudaGetErrorString(status)));
                 return core::Status::ERROR_RUNTIME;
             }
+            // Synchronize to ensure input data is fully copied before kernel execution
+            cudaDeviceSynchronize();
         } else
 #endif
         {
@@ -808,6 +826,88 @@ std::vector<std::string> InferencePlan::get_output_names() const {
         return graph_->outputs();
     }
     return {};
+}
+
+std::shared_ptr<core::Tensor> InferencePlan::get_gpu_tensor(const core::Tensor* cpu_tensor) const {
+    if (!cpu_tensor) {
+        return nullptr;
+    }
+    auto it = gpu_weight_cache_.find(cpu_tensor);
+    if (it != gpu_weight_cache_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+core::Status InferencePlan::preload_weights_to_gpu() {
+#ifdef MINI_INFER_USE_CUDA
+    if (config_.device_type != core::DeviceType::CUDA) {
+        return core::Status::SUCCESS;
+    }
+
+    MI_LOG_INFO("[InferencePlan] Preloading weights to GPU (TensorRT-style)...");
+
+    size_t total_weight_bytes = 0;
+    size_t weight_count = 0;
+
+    // Iterate through all nodes and preload their constant input tensors to GPU
+    for (const auto& node : sorted_nodes_) {
+        if (!node) {
+            continue;
+        }
+
+        // Get input tensors that are constants (weights/biases)
+        const auto& input_tensors = node->input_tensors();
+        for (const auto& tensor : input_tensors) {
+            if (!tensor || tensor->empty()) {
+                continue;
+            }
+
+            // Skip if already on GPU
+            if (tensor->device() == core::DeviceType::CUDA) {
+                continue;
+            }
+
+            // Skip if already cached
+            if (gpu_weight_cache_.find(tensor.get()) != gpu_weight_cache_.end()) {
+                continue;
+            }
+
+            // Create GPU tensor and copy data
+            auto gpu_tensor = std::make_shared<core::Tensor>(
+                tensor->shape(), tensor->dtype(), core::DeviceType::CUDA);
+
+            size_t size_bytes = tensor->size_in_bytes();
+            cudaError_t status = cudaMemcpy(
+                gpu_tensor->data(), tensor->data(), size_bytes, cudaMemcpyHostToDevice);
+
+            if (status != cudaSuccess) {
+                MI_LOG_ERROR("[InferencePlan] Failed to preload weight to GPU: " +
+                             std::string(cudaGetErrorString(status)));
+                return core::Status::ERROR_RUNTIME;
+            }
+
+            // Cache the GPU tensor
+            gpu_weight_cache_[tensor.get()] = gpu_tensor;
+            total_weight_bytes += size_bytes;
+            weight_count++;
+
+            if (config_.enable_profiling) {
+                MI_LOG_INFO("[InferencePlan]   Preloaded tensor for node '" + node->name() +
+                            "': " + tensor->shape().to_string() + " (" +
+                            std::to_string(size_bytes / 1024.0) + " KB)");
+            }
+        }
+    }
+
+    MI_LOG_INFO("[InferencePlan] Preloaded " + std::to_string(weight_count) +
+                " weight tensor(s) to GPU (" +
+                std::to_string(total_weight_bytes / 1024.0) + " KB total)");
+
+    return core::Status::SUCCESS;
+#else
+    return core::Status::SUCCESS;
+#endif
 }
 
 }  // namespace runtime

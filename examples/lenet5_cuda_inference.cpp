@@ -402,25 +402,18 @@ int main(int argc, char** argv) {
         std::cout << std::endl;
 
         // ========================================================================
-        // Step 5: Optional CPU Comparison
+        // Step 4: Optional CPU Comparison
         // ========================================================================
         BenchmarkResult cpu_result = {0, 0, 0.0, 0.0, 0.0};
 
         if (compare_cpu) {
             std::cout << std::string(80, '=') << std::endl;
-            std::cout << "Step 5: CPU Performance Comparison" << std::endl;
+            std::cout << "Step 4: CPU Performance Comparison" << std::endl;
             std::cout << std::string(80, '=') << std::endl;
 
             // Re-parse model for CPU (graph was modified by optimization)
             auto cpu_graph_uptr = parser.parse_from_file(model_path);
             std::shared_ptr<graph::Graph> cpu_graph = std::move(cpu_graph_uptr);
-
-            if (enable_optimization) {
-                graph::GraphOptimizer optimizer;
-                auto fusion_pass = std::make_shared<graph::FusionPass>();
-                optimizer.add_pass(fusion_pass);
-                optimizer.optimize(cpu_graph.get());
-            }
 
             runtime::EngineConfig cpu_config;
             cpu_config.device_type = core::DeviceType::CPU;
@@ -441,7 +434,7 @@ int main(int argc, char** argv) {
         }
 
         // ========================================================================
-        // Step 6: Results Display
+        // Step 5: Results Display
         // ========================================================================
         std::cout << std::string(80, '=') << std::endl;
         std::cout << "Results Summary" << std::endl;

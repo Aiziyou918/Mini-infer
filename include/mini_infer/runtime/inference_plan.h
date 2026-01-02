@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "mini_infer/backends/device_context.h"
+#include "mini_infer/core/allocator.h"
+#include "mini_infer/core/tensor.h"
 #include "mini_infer/core/types.h"
 #include "mini_infer/graph/graph.h"
 #include "mini_infer/graph/graph_optimizer.h"
@@ -106,6 +108,13 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
         return weights_;
     }
 
+    /**
+     * @brief Get GPU tensor for a CPU tensor (TensorRT-style preloaded weights)
+     * @param cpu_tensor The original CPU tensor
+     * @return GPU tensor if available, nullptr otherwise
+     */
+    std::shared_ptr<core::Tensor> get_gpu_tensor(const core::Tensor* cpu_tensor) const;
+
    private:
     friend class ExecutionContext;
 
@@ -117,12 +126,17 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
     graph::GraphOptimizer::Statistics optimization_stats_;
     std::vector<InputBinding> input_bindings_;
 
+    // TensorRT-style: GPU weights preloaded at build time
+    std::unordered_map<const core::Tensor*, std::shared_ptr<core::Tensor>> gpu_weight_cache_;
+    std::shared_ptr<core::Allocator> cuda_allocator_;  // Keep CUDA allocator alive
+
     core::Status optimize_graph();
     core::Status infer_shapes();
     core::Status infer_shapes_with_profile();
     core::Status update_tensor_properties();
     core::Status plan_memory();
     core::Status initialize_input_bindings();
+    core::Status preload_weights_to_gpu();  // TensorRT-style weight preloading
 
     core::Status gather_map_inputs(
         const std::unordered_map<std::string, std::shared_ptr<core::Tensor>>& inputs,
