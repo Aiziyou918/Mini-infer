@@ -49,9 +49,16 @@ include/mini_infer/
 │   └── graph.h            # Graph 容器
 ├── backends/              # Backends 模块 (执行环境)
 │   └── device_context.h   # 设备上下文基类
-├── kernels/               # Kernels 模块 (计算核心)
-│   ├── kernel_registry.h  # 注册表与分发器
-│   └── cpu/               # CPU Kernel 声明
+├── operators/             # Operators 模块 (插件化算子系统)
+│   ├── operator.h         # Operator 基类 (元数据容器)
+│   ├── plugin_base.h      # IPlugin 接口定义
+│   ├── plugin_registry.h  # PluginRegistry 单例注册表
+│   ├── cpu_plugin.h       # CPUPlugin CRTP 基类
+│   ├── cuda_plugin.h      # CUDAPlugin CRTP 基类
+│   ├── generic_operator.h # 通用算子容器
+│   └── plugin_operator_adapter.h  # Plugin-Operator 适配器
+├── kernels/               # Kernels 模块 (底层计算原语)
+│   └── kernel_base.h      # Kernel 基础接口
 └── importers/             # Importers 模块 (前端)
     └── onnx_parser.h      # ONNX 解析器
 ```
@@ -70,17 +77,35 @@ src/
 │   └── memory_planner.cpp
 ├── graph/                 # Graph 实现
 ├── backends/              # Backends 实现
-│   └── cpu/               # CPU DeviceContext 实现
-├── kernels/               # Kernels 实现 (重点)
-│   ├── kernel_registry.cpp
-│   └── cpu/               # 具体 CPU 算子实现
-│       ├── conv2d_cpu.cpp
-│       ├── relu_cpu.cpp
-│       ├── pooling_cpu.cpp
+│   ├── cpu/               # CPU DeviceContext 实现
+│   └── cuda/              # CUDA DeviceContext 实现
+├── kernels/               # Kernels 实现 (底层计算原语)
+│   ├── cpu/               # CPU Kernel 实现
+│   │   ├── gemm_cpu.cpp   # GEMM 矩阵乘法
+│   │   ├── im2col_cpu.cpp # Im2Col 变换
+│   │   └── ...
+│   └── cuda/              # CUDA Kernel 实现
+│       ├── gemm_cuda.cu
+│       ├── im2col_cuda.cu
 │       └── ...
-├── operators/             # Operators 实现 (Metadata & Shape Infer)
-│   ├── conv2d.cpp
-│   └── ...
+├── operators/             # Operators 实现 (插件化算子)
+│   ├── plugin_registry.cpp  # 插件注册表实现
+│   ├── cpu/               # CPU 插件实现
+│   │   ├── conv2d_cpu.cpp
+│   │   ├── linear_cpu.cpp
+│   │   ├── relu_cpu.cpp
+│   │   ├── pooling_cpu.cpp
+│   │   ├── flatten_cpu.cpp
+│   │   ├── reshape_cpu.cpp
+│   │   └── softmax_cpu.cpp
+│   └── cuda/              # CUDA 插件实现
+│       ├── conv2d_cuda.cu
+│       ├── linear_cuda.cu
+│       ├── relu_cuda.cu
+│       ├── pooling_cuda.cu
+│       ├── flatten_cuda.cu
+│       ├── reshape_cuda.cu
+│       └── softmax_cuda.cu
 ├── importers/             # Importers 实现
     └── internal/          # 内部实现 (Pimpl)
         └── onnx_graph_builder.cpp
@@ -94,21 +119,25 @@ src/
 - **InferencePlan**: 编译期产物，包含优化后的图和内存偏移量表。
 - **ExecutionContext**: 运行期产物，持有实际的内存池和 Tensor 实例。
 
-### 2. Kernels
-计算的核心。这里的代码不做任何图相关的逻辑，只负责数学运算。
-- **Registry**: 负责根据 `{OpType, DeviceType, DataType}` 找到正确的函数指针。
-- **CPU Kernels**: 实现具体的计算逻辑（未来会增加 `src/kernels/cuda/`）。
+### 2. Operators (插件化算子系统)
+采用 **TensorRT-style Plugin 架构**，实现算子与计算的解耦。
 
-### 3. Core
+- **IPlugin 接口**: 定义算子的标准接口（形状推导、执行、工作空间等）。
+- **PluginRegistry**: 全局单例注册表，按 `{OpType, DeviceType}` 查找插件。
+- **CPUPlugin / CUDAPlugin**: CRTP 基类，提供设备特定的默认实现。
+- **Plugin 实现**: 每个算子在每个设备上有独立的插件实现（如 `Conv2DCPUPlugin`, `ReLUCUDAPlugin`）。
+
+### 3. Kernels
+底层计算原语，被 Plugin 调用。
+- **GEMM**: 通用矩阵乘法。
+- **Im2Col**: 卷积的图像到列变换。
+- **Bias**: 偏置加法。
+- **Transpose**: 矩阵转置。
+
+### 4. Core
 基础数据结构。
 - **Tensor**: 实现了 View 机制，Metadata 与 Data 分离。
 - **Storage**: 管理原始内存块，支持引用计数。
-
-### 4. Operators
-算子的元数据中心。
-- 负责定义算子有哪些参数（如 Conv 的 stride/padding）。
-- 负责在编译期推导 Shape。
-- **不包含**任何计算逻辑（计算逻辑全部移到了 Kernels）。
 
 ## 依赖关系
 
@@ -116,8 +145,9 @@ src/
 graph TD
     Runtime --> Graph
     Runtime --> Backends
-    Runtime --> Kernels
-    Graph --> Operators
+    Runtime --> Operators
+    Graph --> Core
+    Operators --> Kernels
     Operators --> Core
     Kernels --> Backends
     Kernels --> Core

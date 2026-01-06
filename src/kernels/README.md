@@ -1,17 +1,17 @@
 # Mini-Infer Kernel Layer
 
-## 📖 概述
+## 概述
 
-Kernel层是Mini-Infer的计算核心，提供高性能的算子实现。设计参考TensorRT的Plugin架构，支持多Backend（CPU/GPU）和灵活扩展。
+Kernel 层是 Mini-Infer 的**底层计算原语**，提供高性能的基础数学运算。在新的插件化架构中，Kernel 层被 Plugin 调用，不再直接与算子绑定。
 
-## 🏗️ 架构设计
+## 架构设计
 
 ```
 ┌─────────────────────────────────────┐
-│        Operator Layer               │
-│   (Conv2D, Linear, ReLU, ...)       │
+│        Plugin Layer                 │
+│   (Conv2DPlugin, LinearPlugin...)   │
 └───────────────┬─────────────────────┘
-                │
+                │ 调用
 ┌───────────────▼─────────────────────┐
 │        Kernel Interface             │
 │   (GEMMKernel, Im2ColKernel, ...)   │
@@ -21,44 +21,55 @@ Kernel层是Mini-Infer的计算核心，提供高性能的算子实现。设计�
         │                │
 ┌───────▼──────┐  ┌──────▼────────┐
 │ CPU Kernels  │  │  CUDA Kernels │
-│              │  │   (未来)       │
+│              │  │               │
 │ - gemm_cpu   │  │ - gemm_cuda   │
 │ - im2col_cpu │  │ - im2col_cuda │
+│ - bias_cpu   │  │ - bias_cuda   │
 └──────────────┘  └───────────────┘
 ```
 
-## 📁 目录结构
+## 目录结构
 
 ```
 kernels/
 ├── README.md           # 本文件
 ├── CMakeLists.txt      # 构建配置
-└── cpu/                # CPU实现
-    ├── gemm_cpu.cpp    # GEMM实现
-    └── im2col_cpu.cpp  # Im2Col实现
+├── cpu/                # CPU 实现
+│   ├── gemm_cpu.cpp    # GEMM 矩阵乘法
+│   ├── im2col_cpu.cpp  # Im2Col 变换
+│   └── bias_cpu.cpp    # 偏置加法
+└── cuda/               # CUDA 实现
+    ├── gemm_cuda.cu    # CUDA GEMM
+    ├── im2col_cuda.cu  # CUDA Im2Col
+    ├── bias_cuda.cu    # CUDA 偏置加法
+    └── transpose_cuda.cu # CUDA 转置
 ```
 
-### 未来规划
-```
-kernels/
-├── cuda/               # GPU实现
-│   ├── gemm_cuda.cu
-│   ├── gemm_cublas.cu
-│   └── im2col_cuda.cu
-├── cpu/
-│   ├── gemm_cpu.cpp          # 基础实现
-│   ├── gemm_cpu_avx2.cpp     # AVX2优化
-│   ├── gemm_cpu_avx512.cpp   # AVX512优化
-│   └── gemm_blas.cpp         # BLAS包装
-└── arm/                # ARM NEON优化
-    └── gemm_neon.cpp
-```
+## 与 Plugin 的关系
 
-## 🔧 已实现的Kernel
+在新架构中，**Kernel 和 Plugin 的职责明确分离**：
+
+| 层级 | 职责 | 示例 |
+|------|------|------|
+| **Plugin** | 算子逻辑、形状推导、参数管理 | Conv2DCPUPlugin, ReLUCUDAPlugin |
+| **Kernel** | 纯粹的数学计算 | GEMMKernel, Im2ColKernel |
+
+Plugin 负责：
+- 实现 `IPlugin` 接口
+- 形状推导 (`infer_output_shapes`)
+- 调用 Kernel 执行计算
+- 管理算子参数
+
+Kernel 负责：
+- 高性能的数学运算
+- 设备特定的优化（SIMD、CUDA）
+- 无状态的纯函数
+
+## 已实现的 Kernel
 
 ### 1. GEMM (General Matrix Multiplication)
 
-**位置**: `cpu/gemm_cpu.cpp`
+**位置**: `cpu/gemm_cpu.cpp`, `cumm_cuda.cu`
 
 **接口**:
 ```cpp
@@ -66,10 +77,10 @@ namespace kernels {
 class GEMMKernel {
     // C = A @ B
     template<typename T>
-    static void gemm_nn(const T* A, const T* B, T* C, 
+    static void gemm_nn(const T* A, const T* B, T* C,
                        int M, int N, int K);
-    
-    // C = A @ B^T  
+
+    // C = A @ B^T
     template<typename T>
     static void gemm_nt(const T* A, const T* B, T* C,
                        int M, int N, int K);
@@ -77,30 +88,24 @@ class GEMMKernel {
 }
 ```
 
-**使用示例**:
+**使用示例** (在 Plugin 中):
 ```cpp
-// Conv2D中使用
+// Conv2DCPUPlugin::enqueue() 中
 kernels::GEMMKernel::gemm_nn<float>(
-    weight, col_buffer, output, 
+    weight, col_buffer, output,
     C_out, H_out*W_out, C_in*kH*kW
 );
 
-// Linear中使用
+// LinearCPUPlugin::enqueue() 中
 kernels::GEMMKernel::gemm_nt<float>(
-    input, weight, output,
+    inweight, output,
     batch_size, out_features, in_features
 );
 ```
 
-**性能特点**:
-- ✅ 循环展开（4元素/次）
-- ⏳ 未来：AVX2/AVX512向量化
-- ⏳ 未来：OpenMP并行化
-- ⏳ 未来：Cache blocking优化
-
 ### 2. Im2Col (Image to Column)
 
-**位置**: `cpu/im2col_cpu.cpp`
+**位置**: `cpu/im2col_cpu.cpp`, `cuda/im2col_cuda.cu`
 
 **接口**:
 ```cpp
@@ -120,147 +125,102 @@ class Im2ColKernel {
 }
 ```
 
-**使用示例**:
-```cpp
-// Conv2D中使用
-kernels::Im2ColKernel::im2col<float>(
-    input_n, col_buffer.data(),
-    C_in, H_in, W_in,
-    kernel_h, kernel_w,
-    stride_h, stride_w,
-    padding_h, padding_w,
-    dilation_h, dilation_w,
-    H_out, W_out
-);
-```
+### 3. Bias (偏置加法)
 
-## 🚀 性能优化路径
+**位置**: `cpu/bias_cpu.cpp`, `cuda/bias_cuda.cu`
 
-### CPU优化
-
-1. **当前（v1.0）**: 朴素实现
-   - 循环展开
-   - 缓存友好的访问模式
-
-2. **短期（v1.1）**: SIMD向量化
-   ```cpp
-   // AVX2: 8个float/次
-   __m256 a = _mm256_load_ps(&A[i]);
-   __m256 b = _mm256_load_ps(&B[i]);
-   __m256 c = _mm256_fmadd_ps(a, b, c);
-   ```
-
-3. **中期（v1.2）**: BLAS集成
-   ```cpp
-   #ifdef USE_OPENBLAS
-       cblas_sgemm(...);
-   #else
-       gemm_cpu(...);
-   #endif
-   ```
-
-4. **长期（v2.0）**: 自适应优化
-   ```cpp
-   // 运行时选择最优kernel
-   if (M > 1024 && N > 1024)
-       gemm_blas(...);      // 大矩阵用BLAS
-   else
-       gemm_cpu_avx2(...);  // 小矩阵用AVX2
-   ```
-
-### GPU优化
-
-```cpp
-// CUDA实现（未来）
-template<>
-void GEMMKernel::gemm_nn<float>(
-    const float* A, const float* B, float* C,
-    int M, int N, int K,
-    KernelBackend::CUDA) {
-    
-    // Option 1: cuBLAS
-    cublasSgemm(handle, ...);
-    
-    // Option 2: 自定义CUDA kernel
-    gemm_kernel<<<grid, block>>>(A, B, C, M, N, K);
-    
-    // Option 3: CUTLASS模板库
-    cutlass::gemm::device::Gemm<...> gemm_op;
-    gemm_op(M, N, K, ...);
-}
-```
-
-## 📊 Benchmark目标
-
-| 操作 | 当前 | v1.1 (AVX2) | v1.2 (BLAS) | v2.0 (CUDA) |
-|------|------|-------------|-------------|-------------|
-| GEMM (1024x1024) | 100ms | 25ms | 10ms | 1ms |
-| Conv2D (224x224x64) | 500ms | 125ms | 50ms | 5ms |
-
-## 🔌 扩展指南
-
-### 添加新的CPU优化版本
-
-1. 创建文件: `cpu/gemm_cpu_avx2.cpp`
-2. 实现优化版本:
+**接口**:
 ```cpp
 namespace kernels {
-namespace cpu {
-namespace avx2 {
+class BiasKernel {
     template<typename T>
-    void gemm_nn_impl(...) {
-        // AVX2实现
-    }
-}
-}
+    static void add_channel_bias(
+        T* data, const T* bias,
+        int batch, int channels, int spatial_size
+    );
+};
 }
 ```
 
-3. 更新dispatcher:
+### 4. Transpose (矩阵转置)
+
+**位置**: `cuda/transpose_cuda.cu`
+
+**接口**:
 ```cpp
-template<typename T>
-void GEMMKernel::gemm_nn(..., KernelBackend backend) {
-    switch (backend) {
-        case KernelBackend::CPU_AVX2:
-            cpu::avx2::gemm_nn_impl<T>(...);
-            break;
-        default:
-            cpu::gemm_nn_impl<T>(...);
-    }
+namespace kernels {
+class TransposeKernel {
+    template<typename T>
+    static void transpose_2d(
+        const T* input, T* output,
+        int rows, int cols
+    );
+};
 }
 ```
 
-### 添加CUDA支持
+## 性能优化
 
-1. 创建文件: `cuda/gemm_cuda.cu`
-2. CMakeLists.txt:
-```cmake
-if(USE_CUDA)
-    enable_language(CUDA)
-    target_sources(mini_infer_kernels PRIVATE
-        cuda/gemm_cuda.cu
-        cuda/im2col_cuda.cu
-    )
-    target_compile_options(mini_infer_kernels PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-arch=sm_75>
-    )
-endif()
+### CPU 优化
+
+1. **当前**: 循环展开、缓存友好的访问模式
+2. **计划**: AVX2/AVX-512 向量化、OpenMP 并行化
+
+### CUDA 优化
+
+1. **向量化访问**: 使用 `float4` 提高内存带宽利用率
+2. **共享内存**: 减少全局内存访问
+3. **Warp 级优化**: 利用 warp shuffle 指令
+
+## 扩展指南
+
+### 添加新的 CPU Kernel
+
+1. 创建文件: `cpu/new_kernel_cpu.cpp`
+2. 实现 Kernel 类:
+```cpp
+namespace mini_infer {
+namespace kernels {
+
+class NewKernel {
+public:
+    template<typename T>
+    static void compute(const T* input, T* output, int size) {
+        // CPU 实现
+    }
+};
+
+} // namespace kernels
+} // namespace mini_infer
 ```
 
-## 📚 参考资料
+3. 在 CMakeLists.txt 中添加源文件
+
+### 添加新的 CUDA Kernel
+
+1. 创建文件: `cuda/new_kernel_cuda.cu`
+2. 实现 CUDA Kernel:
+```cpp
+namespace mini_infer {
+namespace kernels {
+namespace cuda {
+
+template<typename T>
+__global__ void new_kernel_cuda(const T* input, T* output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        // CUDA 实现
+    }
+}
+
+} // namespace cuda
+} // namespace kernels
+} // namespace mini_infer
+```
+
+## 参考资料
 
 - [How to Optimize GEMM](https://github.com/flame/how-to-optimize-gemm)
 - [Caffe Im2Col](https://github.com/BVLC/caffe/blob/master/src/caffe/util/im2col.cpp)
 - [cuBLAS Documentation](https://docs.nvidia.com/cuda/cublas/)
-- [Intel MKL](https://software.intel.com/content/www/us/en/develop/tools/oneapi/components/onemkl.html)
 - [CUTLASS](https://github.com/NVIDIA/cutlass)
-
-## 🤝 贡献指南
-
-欢迎贡献新的kernel实现！请确保：
-
-1. ✅ 保持接口一致性
-2. ✅ 添加单元测试
-3. ✅ 性能基准测试
-4. ✅ 文档和注释
-5. ✅ 跨平台兼容性

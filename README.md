@@ -1,18 +1,25 @@
 # Mini-Infer
 
-一个轻量极大、高性能的深度学习推理框架，架构设计灵感源自 TensorRT 和 PyTorch。我们追求极致的 **Zero-Copy** 和 **Static Memory Planning**。
+一个轻量级、高性能的深度学习推理框架，架构设计灵感源自 TensorRT 和 PyTorch。我们追求极致的 **Zero-Copy** 和 **Static Memory Planning**。
 
 ## 项目特性
 
-- 🚄 **高性能 (High Performance)**:
+- **高性能 (High Performance)**:
     - **静态内存规划**: 采用 Linear Scan 算法，将所有中间张量压缩到一块连续内存中，极大降低碎片和分配开销。
     - **零拷贝**: Tensor View 设计，支持切片和 Reshape 而不产生数据拷贝。
-    - **无锁 Allocator**: 针对高性能场景优化的内存分配器。
-- 🧩 **模块化设计 (Modular Architecture)**:
+    - **TensorRT-style 权重预加载**: 权重在构建阶段加载到设备内存，推理时零开销。
+- **插件化算子系统 (Plugin Architecture)**:
+    - **TensorRT-style IPlugin 接口**: 标准化的算子接口，支持形状推导、执行、工作空间管理。
+    - **多设备支持**: 同一算子可有 CPU 和 CUDA 两种实现，运行时自动选择。
+    - **CRTP 优化**: 使用编译期多态减少虚函数开销。
+    - **易扩展**: 添加新算子只需实现 IPlugin 接口并注册。
+- **模块化设计 (Modular Architecture)**:
     - **Core**: 基础数据结构 (Tensor/Storage)。
     - **Runtime**: 推理引擎 (InferencePlan/ExecutionContext)，支持并发推理。
-    - **Backends**: 异构设备管理 (DeviceContext/Registry)，支持 CPU/CUDA 热插拔。
-- 🔌 **ONNX 支持**:
+    - **Backends**: 异构设备管理 (DeviceContext)，支持 CPU/CUDA。
+    - **Operators**: 插件化算子系统 (IPlugin/PluginRegistry)。
+    - **Kernels**: 底层计算原语 (GEMM/Im2Col/Bias)。
+- **ONNX 支持**:
     - 内置 ONNX 解析器，支持将 ONNX 模型直接导入为计算图。
     - **Port-Based Graph**: 支持多输入多输出 (MIMO) 的复杂拓扑结构。
 
@@ -23,11 +30,19 @@ Mini-Infer/
 ├── include/mini_infer/
 │   ├── core/          # 核心数据结构（Tensor, Storage, Allocator）
 │   ├── backends/      # 执行环境（DeviceContext）
-│   ├── kernels/       # 算子注册表与内核（Registry, Dispatcher）
-│   ├── graph/         # 计DAG 图结构（Node, Edge, Port）
+│   ├── operators/     # 插件化算子系统（IPlugin, PluginRegistry）
+│   ├── kernels/       # 底层计算原语（GEMM, Im2Col）
+│   ├── graph/         # 计算 DAG 图结构（Node, Edge, Port）
 │   ├── runtime/       # 推理引擎（Plan, Context, MemoryPlanner）
 │   └── importers/     # 模型导入（OnnxParser）
-├── src/               # 源代码实现
+├── src/
+│   ├── operators/     # 插件实现
+│   │   ├── cpu/       # CPU 插件（Conv2D, Linear, ReLU...）
+│   │   └── cuda/      # CUDA 插件
+│   ├── kernels/       # Kernel 实现
+│   │   ├── cpu/       # CPU Kernel
+│   │   └── cuda/      # CUDA Kernel
+│   └── ...
 └── examples/          # 示例代码
 ```
 
@@ -138,7 +153,7 @@ conan install . --output-folder=build --build=missing \
 
 详细的构建选项请参考 [Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)。
 
-## 📚 文档
+## 文档
 
 - **[快速开始](QUICK_START.md)** - 快速上手指南
 - **[Conan 构建指南](docs/CONAN_BUILD_GUIDE.md)** - 详细的 Conan 使用说明
@@ -147,13 +162,14 @@ conan install . --output-folder=build --build=missing \
 - **[API 文档](docs/API.md)** - API 参考手册
 - **[入门教程](docs/GETTING_STARTED.md)** - 完整的入门教程
 
-## 🤝 贡献
+## 贡献
 
 欢迎提交 Issue 和 Pull Request！我们正在积极寻找以下贡献：
 - [ ] SIMD 优化 (AVX2/NEON) for CPU Kernels
-- [ ] CUDA Kernels 实现
 - [ ] 更多 ONNX 算子支持
+- [ ] INT8 量化推理支持
+- [ ] 动态形状推理完善
 
-## 📄 许可证
+## 许可证
 
 MIT License
