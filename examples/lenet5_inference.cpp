@@ -16,6 +16,8 @@
  */
 
 #include "mini_infer/mini_infer.h"
+#include "mini_infer/operators/plugin_registry.h"
+#include "mini_infer/operators/plugin_base.h"
 #include "utils/simple_loader.h"
 #include <iostream>
 #include <iomanip>
@@ -55,231 +57,204 @@ public:
     LeNet5(const utils::LeNet5Weights& weights) {
         // Store weights
         weights_ = weights;
-        
-        // Create operators
+
+        // Create operators using new plugin architecture
+
         // Conv1: 1 → 6 channels, 5x5 kernel
-        conv1_param_ = operators::Conv2DParam(
-            5, 5,  // kernel_h, kernel_w
-            1, 1,  // stride_h, stride_w
-            0, 0,  // padding_h, padding_w
-            1,     // groups
-            true   // use_bias
-        );
-        conv1_ = std::make_shared<operators::Conv2D>(conv1_param_);
-        
+        conv1_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kCONVOLUTION, core::DeviceType::CPU);
+        if (!conv1_) {
+            throw std::runtime_error("Failed to create Conv1 plugin");
+        }
+        auto conv1_param = std::make_shared<operators::Conv2DParam>();
+        conv1_param->kernel_h = 5;
+        conv1_param->kernel_w = 5;
+        conv1_param->stride_h = 1;
+        conv1_param->stride_w = 1;
+        conv1_param->padding_h = 0;
+        conv1_param->padding_w = 0;
+        conv1_param->use_bias = true;
+        conv1_->set_param(conv1_param);
+
         // Conv2: 6 → 16 channels, 5x5 kernel
-        conv2_param_ = operators::Conv2DParam(
-            5, 5,  // kernel_h, kernel_w
-            1, 1,  // stride_h, stride_w
-            0, 0,  // padding_h, padding_w
-            1,     // groups
-            true   // use_bias
-        );
-        conv2_ = std::make_shared<operators::Conv2D>(conv2_param_);
-        
+        conv2_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kCONVOLUTION, core::DeviceType::CPU);
+        if (!conv2_) {
+            throw std::runtime_error("Failed to create Conv2 plugin");
+        }
+        auto conv2_param = std::make_shared<operators::Conv2DParam>();
+        conv2_param->kernel_h = 5;
+        conv2_param->kernel_w = 5;
+        conv2_param->stride_h = 1;
+        conv2_param->stride_w = 1;
+        conv2_param->padding_h = 0;
+        conv2_param->padding_w = 0;
+        conv2_param->use_bias = true;
+        conv2_->set_param(conv2_param);
+
         // Pooling: 2x2 max pooling
-        pool_param_ = operators::PoolingParam(
-            operators::PoolingType::MAX,
-            2, 2,  // kernel_h, kernel_w
-            2, 2,  // stride_h, stride_w
-            0, 0   // padding_h, padding_w
-        );
-        pool_ = std::make_shared<operators::Pooling>(pool_param_);
-        
+        pool_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kMAX_POOL, core::DeviceType::CPU);
+        if (!pool_) {
+            throw std::runtime_error("Failed to create Pooling plugin");
+        }
+        auto pool_param = std::make_shared<operators::PoolingParam>();
+        pool_param->type = operators::PoolingType::MAX;
+        pool_param->kernel_h = 2;
+        pool_param->kernel_w = 2;
+        pool_param->stride_h = 2;
+        pool_param->stride_w = 2;
+        pool_param->padding_h = 0;
+        pool_param->padding_w = 0;
+        pool_->set_param(pool_param);
+
         // ReLU activation
-        relu_ = std::make_shared<operators::ReLU>();
-        
+        relu_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kRELU, core::DeviceType::CPU);
+        if (!relu_) {
+            throw std::runtime_error("Failed to create ReLU plugin");
+        }
+
+        // Flatten
+        flatten_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kFLATTEN, core::DeviceType::CPU);
+        if (!flatten_) {
+            throw std::runtime_error("Failed to create Flatten plugin");
+        }
+        auto flatten_param = std::make_shared<operators::FlattenParam>();
+        flatten_param->axis = 1;
+        flatten_->set_param(flatten_param);
+
         // Linear (Fully Connected) layers
-        fc1_ = std::make_shared<operators::Linear>(operators::LinearParam(256, 120, true));
-        fc2_ = std::make_shared<operators::Linear>(operators::LinearParam(120, 84, true));
-        fc3_ = std::make_shared<operators::Linear>(operators::LinearParam(84, 10, true));
-        
-        std::cout << "LeNet-5 model created successfully" << std::endl;
+        fc1_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kGEMM, core::DeviceType::CPU);
+        if (!fc1_) {
+            throw std::runtime_error("Failed to create FC1 plugin");
+        }
+
+        fc2_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kGEMM, core::DeviceType::CPU);
+        if (!fc2_) {
+            throw std::runtime_error("Failed to create FC2 plugin");
+        }
+
+        fc3_ = operators::PluginRegistry::instance().create_plugin(
+            core::OpType::kGEMM, core::DeviceType::CPU);
+        if (!fc3_) {
+            throw std::runtime_error("Failed to create FC3 plugin");
+        }
+
+        std::cout << "LeNet-5 model created successfully (using plugin architecture)" << std::endl;
     }
     
     /**
+     * @brief Helper function to execute a plugin
+     */
+    std::shared_ptr<core::Tensor> execute_plugin(
+        std::shared_ptr<operators::IPlugin> plugin,
+        const std::vector<std::shared_ptr<core::Tensor>>& inputs,
+        const std::string& op_name
+    ) {
+        // Infer output shape
+        std::vector<core::Shape> input_shapes;
+        for (const auto& input : inputs) {
+            input_shapes.push_back(input->shape());
+        }
+
+        std::vector<core::Shape> output_shapes;
+        auto status = plugin->infer_output_shapes(input_shapes, output_shapes);
+        if (status != core::Status::SUCCESS || output_shapes.empty()) {
+            std::cerr << "Error: " << op_name << " shape inference failed" << std::endl;
+            return nullptr;
+        }
+
+        // Create output tensor
+        auto output = core::Tensor::create(output_shapes[0], core::DataType::FLOAT32);
+
+        // Execute plugin
+        std::vector<std::shared_ptr<core::Tensor>> outputs = {output};
+        operators::PluginContext ctx;
+        status = plugin->enqueue(inputs, outputs, ctx);
+        if (status != core::Status::SUCCESS) {
+            std::cerr << "Error: " << op_name << " forward failed" << std::endl;
+            return nullptr;
+        }
+
+        return output;
+    }
+
+    /**
      * @brief Forward pass
-     * 
+     *
      * @param input Input tensor [batch_size, 1, 28, 28]
      * @return Output tensor [batch_size, 10]
      */
     std::shared_ptr<core::Tensor> forward(std::shared_ptr<core::Tensor> input) {
         auto x = input;
-        
+
         // Conv1: [N, 1, 28, 28] -> [N, 6, 24, 24]
-        std::vector<core::Shape> conv1_output_shapes;
-        conv1_->infer_shape({x->shape(), weights_.conv1_weight->shape(), weights_.conv1_bias->shape()}, conv1_output_shapes);
-        auto conv1_out = core::Tensor::create(conv1_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> conv1_outputs = {conv1_out};
-        auto status = conv1_->forward({x, weights_.conv1_weight, weights_.conv1_bias}, conv1_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: Conv1 forward failed (status=" << static_cast<int>(status) << ")" << std::endl;
-            return nullptr;
-        }
-        x = conv1_outputs[0];
-        
+        x = execute_plugin(conv1_, {x, weights_.conv1_weight, weights_.conv1_bias}, "Conv1");
+        if (!x) return nullptr;
+
         // ReLU1
-        std::vector<core::Shape> relu1_output_shapes;
-        relu_->infer_shape({x->shape()}, relu1_output_shapes);
-        auto relu1_out = core::Tensor::create(relu1_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> relu1_outputs = {relu1_out};
-        status = relu_->forward({x}, relu1_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: ReLU1 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = relu1_outputs[0];
-        
+        x = execute_plugin(relu_, {x}, "ReLU1");
+        if (!x) return nullptr;
+
         // Pool1: [N, 6, 24, 24] -> [N, 6, 12, 12]
-        std::vector<core::Shape> pool1_output_shapes;
-        pool_->infer_shape({x->shape()}, pool1_output_shapes);
-        auto pool1_out = core::Tensor::create(pool1_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> pool1_outputs = {pool1_out};
-        status = pool_->forward({x}, pool1_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: Pool1 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = pool1_outputs[0];
-        
+        x = execute_plugin(pool_, {x}, "Pool1");
+        if (!x) return nullptr;
+
         // Conv2: [N, 6, 12, 12] -> [N, 16, 8, 8]
-        std::vector<core::Shape> conv2_output_shapes;
-        conv2_->infer_shape({x->shape(), weights_.conv2_weight->shape(), weights_.conv2_bias->shape()}, conv2_output_shapes);
-        auto conv2_out = core::Tensor::create(conv2_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> conv2_outputs = {conv2_out};
-        status = conv2_->forward({x, weights_.conv2_weight, weights_.conv2_bias}, conv2_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: Conv2 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = conv2_outputs[0];
-        
+        x = execute_plugin(conv2_, {x, weights_.conv2_weight, weights_.conv2_bias}, "Conv2");
+        if (!x) return nullptr;
+
         // ReLU2
-        std::vector<core::Shape> relu2_output_shapes;
-        relu_->infer_shape({x->shape()}, relu2_output_shapes);
-        auto relu2_out = core::Tensor::create(relu2_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> relu2_outputs = {relu2_out};
-        status = relu_->forward({x}, relu2_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: ReLU2 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = relu2_outputs[0];
-        
+        x = execute_plugin(relu_, {x}, "ReLU2");
+        if (!x) return nullptr;
+
         // Pool2: [N, 16, 8, 8] -> [N, 16, 4, 4]
-        std::vector<core::Shape> pool2_output_shapes;
-        pool_->infer_shape({x->shape()}, pool2_output_shapes);
-        auto pool2_out = core::Tensor::create(pool2_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> pool2_outputs = {pool2_out};
-        status = pool_->forward({x}, pool2_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: Pool2 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = pool2_outputs[0];
-        
+        x = execute_plugin(pool_, {x}, "Pool2");
+        if (!x) return nullptr;
+
         // Flatten: [N, 16, 4, 4] → [N, 256]
-        int batch_size = x->shape()[0];
-        x = reshape(x, {batch_size, 256});
-        
+        x = execute_plugin(flatten_, {x}, "Flatten");
+        if (!x) return nullptr;
+
         // FC1: [N, 256] -> [N, 120]
-        std::vector<core::Shape> fc1_output_shapes;
-        fc1_->infer_shape({x->shape(), weights_.fc1_weight->shape(), weights_.fc1_bias->shape()}, fc1_output_shapes);
-        auto fc1_out = core::Tensor::create(fc1_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> fc1_outputs = {fc1_out};
-        status = fc1_->forward({x, weights_.fc1_weight, weights_.fc1_bias}, fc1_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: FC1 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = fc1_outputs[0];
-        
+        x = execute_plugin(fc1_, {x, weights_.fc1_weight, weights_.fc1_bias}, "FC1");
+        if (!x) return nullptr;
+
         // ReLU3
-        std::vector<core::Shape> relu3_output_shapes;
-        relu_->infer_shape({x->shape()}, relu3_output_shapes);
-        auto relu3_out = core::Tensor::create(relu3_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> relu3_outputs = {relu3_out};
-        status = relu_->forward({x}, relu3_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: ReLU3 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = relu3_outputs[0];
-        
+        x = execute_plugin(relu_, {x}, "ReLU3");
+        if (!x) return nullptr;
+
         // FC2: [N, 120] -> [N, 84]
-        std::vector<core::Shape> fc2_output_shapes;
-        fc2_->infer_shape({x->shape(), weights_.fc2_weight->shape(), weights_.fc2_bias->shape()}, fc2_output_shapes);
-        auto fc2_out = core::Tensor::create(fc2_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> fc2_outputs = {fc2_out};
-        status = fc2_->forward({x, weights_.fc2_weight, weights_.fc2_bias}, fc2_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: FC2 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = fc2_outputs[0];
-        
+        x = execute_plugin(fc2_, {x, weights_.fc2_weight, weights_.fc2_bias}, "FC2");
+        if (!x) return nullptr;
+
         // ReLU4
-        std::vector<core::Shape> relu4_output_shapes;
-        relu_->infer_shape({x->shape()}, relu4_output_shapes);
-        auto relu4_out = core::Tensor::create(relu4_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> relu4_outputs = {relu4_out};
-        status = relu_->forward({x}, relu4_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: ReLU4 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = relu4_outputs[0];
-        
+        x = execute_plugin(relu_, {x}, "ReLU4");
+        if (!x) return nullptr;
+
         // FC3: [N, 84] -> [N, 10] (no activation)
-        std::vector<core::Shape> fc3_output_shapes;
-        fc3_->infer_shape({x->shape(), weights_.fc3_weight->shape(), weights_.fc3_bias->shape()}, fc3_output_shapes);
-        auto fc3_out = core::Tensor::create(fc3_output_shapes[0], core::DataType::FLOAT32);
-        std::vector<std::shared_ptr<core::Tensor>> fc3_outputs = {fc3_out};
-        status = fc3_->forward({x, weights_.fc3_weight, weights_.fc3_bias}, fc3_outputs);
-        if (status != core::Status::SUCCESS) {
-            std::cerr << "Error: FC3 forward failed" << std::endl;
-            return nullptr;
-        }
-        x = fc3_outputs[0];
-        
+        x = execute_plugin(fc3_, {x, weights_.fc3_weight, weights_.fc3_bias}, "FC3");
+        if (!x) return nullptr;
+
         return x;
     }
     
 private:
     utils::LeNet5Weights weights_;
-    
-    // Operators
-    std::shared_ptr<operators::Conv2D> conv1_;
-    std::shared_ptr<operators::Conv2D> conv2_;
-    std::shared_ptr<operators::Pooling> pool_;
-    std::shared_ptr<operators::ReLU> relu_;
-    std::shared_ptr<operators::Linear> fc1_;
-    std::shared_ptr<operators::Linear> fc2_;
-    std::shared_ptr<operators::Linear> fc3_;
-    
-    // Parameters
-    operators::Conv2DParam conv1_param_;
-    operators::Conv2DParam conv2_param_;
-    operators::PoolingParam pool_param_;
-    
-    /**
-     * @brief Reshape tensor
-     */
-    std::shared_ptr<core::Tensor> reshape(
-        std::shared_ptr<core::Tensor> input,
-        std::vector<int64_t> new_shape
-    ) {
-        auto output = core::Tensor::create(
-            core::Shape(new_shape),
-            input->dtype()
-        );
-        
-        // Simple memcpy (assumes contiguous memory and same total size)
-        std::memcpy(output->data(), input->data(), 
-                    input->shape().numel() * sizeof(float));
-        
-        return output;
-    }
+
+    // Operators (using new plugin architecture)
+    std::shared_ptr<operators::IPlugin> conv1_;
+    std::shared_ptr<operators::IPlugin> conv2_;
+    std::shared_ptr<operators::IPlugin> pool_;
+    std::shared_ptr<operators::IPlugin> relu_;
+    std::shared_ptr<operators::IPlugin> fc1_;
+    std::shared_ptr<operators::IPlugin> fc2_;
+    std::shared_ptr<operators::IPlugin> fc3_;
+    std::shared_ptr<operators::IPlugin> flatten_;
 };
 
 /**

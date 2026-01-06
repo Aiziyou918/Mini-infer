@@ -2,9 +2,8 @@
 #include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/runtime/optimization_profile.h"
 #include "mini_infer/graph/graph.h"
-#include "mini_infer/operators/conv2d.h"
-#include "mini_infer/operators/relu.h"
-#include "mini_infer/operators/pooling.h"
+#include "mini_infer/operators/generic_operator.h"
+#include "mini_infer/operators/plugin_base.h"
 #include "mini_infer/utils/logger.h"
 #include <chrono>
 #include <unordered_map>
@@ -81,35 +80,37 @@ int main() {
     
     // Conv2D
     auto conv_node = graph->create_node("conv1");
-    operators::Conv2DParam conv_param;
-    conv_param.stride_h = 1;
-    conv_param.stride_w = 1;
-    conv_param.padding_h = 1;
-    conv_param.padding_w = 1;
-    conv_param.use_bias = false;  // This demo omits bias tensor
-    auto conv_op = std::make_shared<operators::Conv2D>(conv_param);
+    auto conv_param = std::make_shared<operators::Conv2DParam>();
+    conv_param->stride_h = 1;
+    conv_param->stride_w = 1;
+    conv_param->padding_h = 1;
+    conv_param->padding_w = 1;
+    conv_param->use_bias = false;  // This demo omits bias tensor
+    auto conv_op = std::make_shared<operators::GenericOperator>("conv1", core::OpType::kCONVOLUTION);
+    conv_op->set_plugin_param(conv_param);
     conv_node->set_operator(conv_op);
-    
+
     auto conv_weight = std::make_shared<core::Tensor>(
         core::Shape({64, 3, 3, 3}),
         core::DataType::FLOAT32
     );
     conv_node->set_input_tensors({nullptr, conv_weight});
-    
+
     // ReLU
     auto relu_node = graph->create_node("relu1");
-    auto relu_op = std::make_shared<operators::ReLU>();
+    auto relu_op = std::make_shared<operators::GenericOperator>("relu1", core::OpType::kRELU);
     relu_node->set_operator(relu_op);
-    
+
     // MaxPool
     auto pool_node = graph->create_node("pool1");
-    operators::PoolingParam pool_param;
-    pool_param.type = operators::PoolingType::MAX;
-    pool_param.kernel_h = 2;
-    pool_param.kernel_w = 2;
-    pool_param.stride_h = 2;
-    pool_param.stride_w = 2;
-    auto pool_op = std::make_shared<operators::Pooling>(pool_param);
+    auto pool_param = std::make_shared<operators::PoolingParam>();
+    pool_param->type = operators::PoolingType::MAX;
+    pool_param->kernel_h = 2;
+    pool_param->kernel_w = 2;
+    pool_param->stride_h = 2;
+    pool_param->stride_w = 2;
+    auto pool_op = std::make_shared<operators::GenericOperator>("pool1", core::OpType::kMAX_POOL);
+    pool_op->set_plugin_param(pool_param);
     pool_node->set_operator(pool_op);
     
     // Connect

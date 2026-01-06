@@ -2,7 +2,8 @@
 #include "mini_infer/core/buffer.h"
 #include "mini_infer/core/allocator.h"
 #include "mini_infer/backends/cpu/cpu_allocator.h"
-#include "mini_infer/operators/conv2d.h"
+#include "mini_infer/operators/plugin_registry.h"
+#include "mini_infer/operators/plugin_base.h"
 #include <iostream>
 #include <iomanip>
 
@@ -76,24 +77,32 @@ void test_buffer_memory() {
 }
 
 /**
- * @brief Demonstrate memory tracking with Conv2D
+ * @brief Demonstrate memory tracking with Conv2D Plugin
  */
 void test_conv2d_memory() {
-    std::cout << "=== Conv2D Memory Tracking ===" << std::endl;
+    std::cout << "=== Conv2D Plugin Memory Tracking ===" << std::endl;
     
     print_memory_stats("Initial");
     
-    // Create Conv2D operator
-    operators::Conv2DParam param;
-    param.kernel_h = 3;
-    param.kernel_w = 3;
-    param.stride_h = 1;
-    param.stride_w = 1;
-    param.padding_h = 1;
-    param.padding_w = 1;
-    param.use_bias = true;
+    // Create Conv2D plugin
+    auto conv_plugin = operators::PluginRegistry::instance().create_plugin(
+        core::OpType::kCONV2D, core::DeviceType::CPU);
     
-    auto conv = std::make_shared<operators::Conv2D>(param);
+    if (!conv_plugin) {
+        std::cerr << "Failed to create Conv2D plugin!" << std::endl;
+        return;
+    }
+    
+    // Set parameters
+    auto param = std::make_shared<operators::Conv2DParam>();
+    param->kernel_h = 3;
+    param->kernel_w = 3;
+    param->stride_h = 1;
+    param->stride_w = 1;
+    param->padding_h = 1;
+    param->padding_w = 1;
+    param->use_bias = true;
+    conv_plugin->set_param(param);
     
     // Create input tensors
     auto input = core::Tensor::create({8, 64, 56, 56}, core::DataType::FLOAT32);
@@ -102,12 +111,25 @@ void test_conv2d_memory() {
     
     print_memory_stats("After creating input/weight/bias tensors");
     
+    // Infer output shape
+    std::vector<core::Shape> input_shapes = {input->shape(), weight->shape(), bias->shape()};
+    std::vector<core::Shape> output_shapes;
+    auto status = conv_plugin->infer_output_shapes(input_shapes, output_shapes);
+    if (status != core::Status::SUCCESS || output_shapes.empty()) {
+        std::cerr << "Shape inference failed!" << std::endl;
+        return;
+    }
+    
+    // Create output tensor
+    auto output = core::Tensor::create(output_shapes[0], core::DataType::FLOAT32);
+    
     // Forward pass
     std::vector<std::shared_ptr<core::Tensor>> inputs = {input, weight, bias};
-    std::vector<std::shared_ptr<core::Tensor>> outputs;
+    std::vector<std::shared_ptr<core::Tensor>> outputs = {output};
     
     {
-        auto status = conv->forward(inputs, outputs);
+        operators::PluginContext ctx;
+        status = conv_plugin->enqueue(inputs, outputs, ctx);
         if (status != core::Status::SUCCESS) {
             std::cerr << "Conv2D forward failed!" << std::endl;
             return;
@@ -120,9 +142,9 @@ void test_conv2d_memory() {
     print_memory_stats("After forward completed");
     
     std::cout << "Output shape: [";
-    for (size_t i = 0; i < outputs[0]->shape().ndim(); ++i) {
-        std::cout << outputs[0]->shape()[i];
-        if (i < outputs[0]->shape().ndim() - 1) std::cout << ", ";
+    for (size_t i = 0; i < output->shape().ndim(); ++i) {
+        std::cout << output->shape()[i];
+        if (i < output->shape().ndim() - 1) std::cout << ", ";
     }
     std::cout << "]" << std::endl;
 }
@@ -138,44 +160,39 @@ void test_memory_leak_detection() {
     size_t initial_count = allocator->allocation_count();
     size_t initial_size = allocator->total_allocated();
     
-    print_memory_stats("Before test");
-    
+    // Simulate some operations
     {
-        // Simulate some operations
-        auto tensor = core::Tensor::create({1000, 1000}, core::DataType::FLOAT32);
-        core::Buffer<float> buffer(1024 * 1024);
-        
-        print_memory_stats("During test");
-        
-    } // All memory should be freed
-    
-    print_memory_stats("After test");
+        auto tensor1 = core::Tensor::create({1000, 1000}, core::DataType::FLOAT32);
+        auto tensor2 = core::Tensor::create({500, 500}, core::DataType::FLOAT32);
+    }
     
     size_t final_count = allocator->allocation_count();
     size_t final_size = allocator->total_allocated();
     
-    std::cout << "Leak check:" << std::endl;
     if (final_count == initial_count && final_size == initial_size) {
-        std::cout << "  [SUCCESS] No memory leak detected!" << std::endl;
+        std::cout << "✓ No memory leaks detected!" << std::endl;
     } else {
-        std::cout << "  [FAILED] Memory leak detected!" << std::endl;
-        std::cout << "    Leaked allocations: " << (final_count - initial_count) << std::endl;
-        std::cout << "    Leaked bytes: " << (final_size - initial_size) << std::endl;
+        std::cout << "✗ Potential memory leak:" << std::endl;
+        std::cout << "  Allocation count diff: " << (final_count - initial_count) << std::endl;
+        std::cout << "  Memory size diff: " << (final_size - initial_size) << " bytes" << std::endl;
     }
-    std::cout << std::endl;
 }
 
 int main() {
+    std::cout << "======================================" << std::endl;
     std::cout << "Mini-Infer Memory Tracking Example" << std::endl;
-    std::cout << "====================================" << std::endl << std::endl;
+    std::cout << "======================================" << std::endl << std::endl;
     
-    // Test different scenarios
     test_tensor_memory();
-    test_buffer_memory();
-    test_conv2d_memory();
-    test_memory_leak_detection();
+    std::cout << std::endl;
     
-    std::cout << "All tests completed!" << std::endl;
+    test_buffer_memory();
+    std::cout << std::endl;
+    
+    test_conv2d_memory();
+    std::cout << std::endl;
+    
+    test_memory_leak_detection();
     
     return 0;
 }

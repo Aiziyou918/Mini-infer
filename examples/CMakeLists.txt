@@ -2,8 +2,8 @@
 
 set(EXAMPLE_SOURCES
     build_graph.cpp
-    lenet5_inference.cpp
     dynamic_shape_advanced.cpp
+    lenet5_inference.cpp
 )
 
 # ONNX examples (only if ONNX is enabled)
@@ -29,7 +29,12 @@ foreach(example_src ${EXAMPLE_SOURCES})
         PRIVATE
             mini_infer_core
             mini_infer_backends
-            mini_infer_operators
+            $<$<PLATFORM_ID:Windows>:-WHOLEARCHIVE:mini_infer_operators>
+            $<$<NOT:$<PLATFORM_ID:Windows>>:-Wl,--whole-archive>
+            $<$<NOT:$<PLATFORM_ID:Windows>>:mini_infer_operators>
+            $<$<NOT:$<PLATFORM_ID:Windows>>:-Wl,--no-whole-archive>
+            $<$<PLATFORM_ID:Windows>:mini_infer_operators>
+            mini_infer_kernels_all
             mini_infer_graph_all
             mini_infer_runtime
             mini_infer_utils
