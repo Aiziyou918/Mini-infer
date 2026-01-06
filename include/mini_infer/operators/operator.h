@@ -8,8 +8,7 @@
 #include "mini_infer/core/op_type.h"
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/core/types.h"
-#include "mini_infer/kernels/kernel_registry.h"
-
+#include "mini_infer/operators/plugin_base.h"
 
 namespace mini_infer {
 namespace operators {
@@ -22,7 +21,15 @@ struct OpParam {
 };
 
 /**
- * @brief Operator interface abstract class
+ * @brief Operator base class
+ *
+ * This class serves as a metadata container for graph nodes.
+ * All actual computation is handled by the Plugin system via cached_plugin_.
+ *
+ * The Operator class is kept for:
+ * - Graph construction and node management
+ * - Parameter storage
+ * - Plugin caching
  */
 class Operator {
    public:
@@ -34,65 +41,24 @@ class Operator {
 
     virtual ~Operator() = default;
 
-    /*
-     * @brief Forward inference
-     * @param inputs The input tensors
-     * @param outputs The output tensors
-     * @return The status of the forward inference
-     */
-    virtual core::Status forward(const std::vector<std::shared_ptr<core::Tensor>>& inputs,
-                                 std::vector<std::shared_ptr<core::Tensor>>& outputs) = 0;
-
     /**
-     * @brief Infer the output shape
-     * @param input_shapes The input shapes
-     * @param output_shapes The output shapes
-     * @return The status of the infer shape
+     * @brief Set the cached plugin for execution
+     * @param plugin The plugin to cache (takes ownership)
      */
-    virtual core::Status infer_shape(const std::vector<core::Shape>& input_shapes,
-                                     std::vector<core::Shape>& output_shapes) = 0;
-
-    /**
-     * @brief Infer output shapes and dtypes
-     * @param input_shapes The input shapes
-     * @param input_dtypes The input dtypes
-     * @param output_shapes The output shapes
-     * @param output_dtypes The output dtypes
-     * @return The status of the infer metadata
-     *
-     * Default behavior: infer shapes and propagate the first input dtype.
-     */
-    virtual core::Status infer_metadata(const std::vector<core::Shape>& input_shapes,
-                                        const std::vector<core::DataType>& input_dtypes,
-                                        std::vector<core::Shape>& output_shapes,
-                                        std::vector<core::DataType>& output_dtypes) {
-        auto status = infer_shape(input_shapes, output_shapes);
-        if (status != core::Status::SUCCESS) {
-            return status;
-        }
-
-        output_dtypes.clear();
-        if (output_shapes.empty()) {
-            return core::Status::SUCCESS;
-        }
-
-        const core::DataType inferred =
-            input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
-        output_dtypes.assign(output_shapes.size(), inferred);
-        return core::Status::SUCCESS;
+    void set_cached_plugin(std::unique_ptr<IPlugin> plugin) {
+        cached_plugin_ = std::move(plugin);
     }
 
-    void set_cached_kernel(kernels::KernelFunc func) {
-        cached_kernel_ = std::move(func);
-    }
-
-    kernels::KernelFunc cached_kernel() const {
-        return cached_kernel_;
+    /**
+     * @brief Get the cached plugin
+     * @return Pointer to the cached plugin, or nullptr if not set
+     */
+    IPlugin* cached_plugin() const {
+        return cached_plugin_.get();
     }
 
     /**
      * @brief Get the name of the operator
-     * @return The name of the operator
      */
     const std::string& name() const {
         return name_;
@@ -100,7 +66,6 @@ class Operator {
 
     /**
      * @brief Get the OpType of the operator
-     * @return The OpType of the operator
      */
     core::OpType type() const {
         return op_type_;
@@ -108,17 +73,23 @@ class Operator {
 
     /**
      * @brief Set the parameter of the operator
-     * @param param The parameter of the operator
      */
     virtual void set_param(std::shared_ptr<OpParam> param) {
         param_ = param;
     }
 
+    /**
+     * @brief Get the parameter of the operator
+     */
+    std::shared_ptr<OpParam> param() const {
+        return param_;
+    }
+
    protected:
-    std::string name_;                //< The name of the operator
-    core::OpType op_type_;            //< The OpType of the operator (cached for fast access)
-    std::shared_ptr<OpParam> param_;  //< The parameter of the operator
-    kernels::KernelFunc cached_kernel_;
+    std::string name_;                         ///< The name of the operator
+    core::OpType op_type_;                     ///< The OpType of the operator
+    std::shared_ptr<OpParam> param_;           ///< The parameter of the operator
+    std::unique_ptr<IPlugin> cached_plugin_;   ///< Cached plugin for execution
 };
 
 /**
