@@ -1,5 +1,5 @@
 #include "mini_infer/kernels/transpose.h"
-#include "mini_infer/kernels/kernel_registry.h"
+#include "mini_infer/kernels/kernel_base.h"
 #include "mini_infer/backends/cuda/cuda_device_context.h"
 #include "mini_infer/utils/logger.h"
 

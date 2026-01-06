@@ -13,12 +13,11 @@
 // Backends
 #include "mini_infer/backends/device_context.h"
 
-// Operators
+// Operators - Plugin Architecture
 #include "mini_infer/operators/operator.h"
-#include "mini_infer/operators/conv2d.h"
-#include "mini_infer/operators/relu.h"
-#include "mini_infer/operators/linear.h"
-#include "mini_infer/operators/pooling.h"
+#include "mini_infer/operators/plugin_base.h"
+#include "mini_infer/operators/plugin_registry.h"
+#include "mini_infer/operators/generic_operator.h"
 
 // Graph
 #include "mini_infer/graph/node.h"
@@ -47,6 +46,7 @@
  * - 灵活的后端支持（CPU、CUDA）
  * - 完整的计算图表示
  * - 易用的 API
+ * - Plugin-based 算子架构
  * 
  * @section install_sec 安装
  * 
@@ -68,7 +68,9 @@
  * core::Shape shape({1, 3, 224, 224});
  * auto tensor = core::Tensor::create(shape, core::DataType::FLOAT32);
  * 
- * // 创建后端
+ * // 使用 Plugin 系统
+ * auto relu_plugin = operators::PluginRegistry::instance().create_plugin(
+ *     core::OpType::kRELU, core::DeviceType::CPU);
  * 
  * // 构建计算图
  * auto graph = std::make_shared<graph::Graph>();
@@ -87,15 +89,14 @@ namespace mini_infer {
  * @brief 获取版本信息
  */
 inline const char* get_version() {
-    return "0.1.0";
+    return "0.2.0";
 }
 
 /**
  * @brief 获取构建信息
  */
 inline const char* get_build_info() {
-    return "Mini-Infer v0.1.0 - Built with C++17";
+    return "Mini-Infer v0.2.0 - Plugin Architecture - Built with C++17";
 }
 
 } // namespace mini_infer
-

@@ -1,32 +1,20 @@
 # Kernel implementations
+# Note: Operator-level kernels (relu, conv2d, pooling, etc.) have been migrated to Plugin architecture.
+# This library now only contains low-level utility kernels (GEMM, Im2Col, Bias, Transpose).
 
 set(KERNEL_SOURCES
     cpu/gemm_cpu.cpp
     cpu/im2col_cpu.cpp
     cpu/bias_cpu.cpp
-    cpu/conv2d_cpu.cpp
     cpu/transpose_cpu.cpp
-    cpu/pooling_cpu.cpp
-    cpu/relu_cpu.cpp
-    cpu/flatten_cpu.cpp
-    cpu/linear_cpu.cpp
-    cpu/reshape_cpu.cpp
-    cpu/softmax_cpu.cpp
 )
 
-# Add CUDA kernels if CUDA is enabled
+# Add CUDA utility kernels if CUDA is enabled
 if(MINI_INFER_ENABLE_CUDA AND CUDAToolkit_FOUND)
     list(APPEND KERNEL_SOURCES
-        cuda/relu_cuda.cu
-        cuda/conv2d_cuda.cu
         cuda/gemm_cuda.cu
         cuda/im2col_cuda.cu
         cuda/bias_cuda.cu
-        cuda/linear_cuda.cu
-        cuda/pooling_cuda.cu
-        cuda/softmax_cuda.cu
-        cuda/flatten_cuda.cu
-        cuda/reshape_cuda.cu
         cuda/transpose_cuda.cu
     )
 endif()

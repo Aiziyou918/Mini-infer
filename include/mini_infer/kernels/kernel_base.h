@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mini_infer/kernels/kernel_types.h"
+#include "mini_infer/backends/device_context.h"
 #include <functional>
 #include <vector>
 #include <memory>
@@ -15,6 +16,30 @@ namespace kernels {
  * Provides a registry-based kernel dispatch system similar to TensorRT's plugin architecture.
  * This avoids virtual function overhead while maintaining flexibility.
  */
+
+/**
+ * @brief Thread-local device context for kernel execution
+ * 
+ * This allows kernels to access the current device context (e.g., CUDA stream)
+ * without passing it through all function calls.
+ */
+inline thread_local backends::DeviceContext* g_current_device_context = nullptr;
+
+/**
+ * @brief Set the current device context for kernel execution
+ * @param context The device context to set
+ */
+inline void set_current_device_context(backends::DeviceContext* context) {
+    g_current_device_context = context;
+}
+
+/**
+ * @brief Get the current device context for kernel execution
+ * @return The current device context, or nullptr if not set
+ */
+inline backends::DeviceContext* get_current_device_context() {
+    return g_current_device_context;
+}
 
 /**
  * @brief Kernel capability checker
