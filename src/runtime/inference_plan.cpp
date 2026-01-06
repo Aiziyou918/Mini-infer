@@ -2,7 +2,8 @@
 
 #include <algorithm>
 
-#include "mini_infer/kernels/kernel_registry.h"
+#include "mini_infer/operators/plugin_registry.h"
+#include "mini_infer/operators/generic_operator.h"
 #include "mini_infer/runtime/execution_context.h"
 #include "mini_infer/utils/logger.h"
 
@@ -260,10 +261,29 @@ core::Status InferencePlan::infer_shapes() {
             }
         }
 
+        // Create plugin for this node (used for both shape inference and execution)
+        auto plugin = operators::PluginRegistry::instance().create_plugin(
+            node->type(), config_.device_type);
+
         std::vector<core::Shape> output_shapes;
         std::vector<core::DataType> output_dtypes;
-        auto status = node->get_operator()->infer_metadata(input_shapes, input_dtypes,
-                                                           output_shapes, output_dtypes);
+        core::Status status;
+
+        // Use plugin for shape inference if available
+        if (plugin) {
+            // Transfer parameters from GenericOperator to plugin if available
+            auto* generic_op = dynamic_cast<operators::GenericOperator*>(node->get_operator().get());
+            if (generic_op && generic_op->plugin_param()) {
+                plugin->set_param(generic_op->plugin_param());
+            }
+
+            status = plugin->infer_output_metadata(input_shapes, input_dtypes,
+                                                   output_shapes, output_dtypes);
+        } else {
+            MI_LOG_ERROR("[InferencePlan] No plugin available for node: " + node->name());
+            return core::Status::ERROR_NOT_IMPLEMENTED;
+        }
+
         if (status != core::Status::SUCCESS) {
             MI_LOG_ERROR("[InferencePlan] Failed to infer shape for node: " + node->name() +
                          " (status=" + std::to_string(static_cast<int>(status)) + ")");
@@ -302,12 +322,9 @@ core::Status InferencePlan::infer_shapes() {
             }
         }
 
-        if (!input_dtypes.empty()) {
-            auto kernel = kernels::KernelRegistry::instance().find(
-                node->type(), config_.device_type, input_dtypes[0]);
-            if (kernel) {
-                node->get_operator()->set_cached_kernel(kernel);
-            }
+        // Cache plugin for execution
+        if (plugin && node->get_operator()->cached_plugin() == nullptr) {
+            node->get_operator()->set_cached_plugin(std::move(plugin));
         }
     }
 

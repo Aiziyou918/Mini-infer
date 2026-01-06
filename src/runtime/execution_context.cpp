@@ -4,7 +4,8 @@
 #include <cstring>
 
 #include "mini_infer/backends/cpu/cpu_allocator.h"
-#include "mini_infer/kernels/kernel_registry.h"
+#include "mini_infer/operators/plugin_base.h"
+#include "mini_infer/operators/plugin_registry.h"
 #include "mini_infer/runtime/inference_plan.h"
 #include "mini_infer/utils/logger.h"
 
@@ -413,18 +414,21 @@ core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& 
         return core::Status::ERROR_NOT_IMPLEMENTED;
     }
 
-    auto* previous_context = kernels::get_current_device_context();
-    kernels::set_current_device_context(context.get());
-
     if (node->id() >= node_outputs_.size()) {
-        kernels::set_current_device_context(previous_context);
         return core::Status::ERROR_RUNTIME;
     }
     auto& output_tensors = node_outputs_[node->id()];
-    auto status = node->get_operator()->forward(merged_inputs, output_tensors);
 
-    kernels::set_current_device_context(previous_context);
-    return status;
+    // Use cached plugin for execution (Plugin architecture)
+    auto* cached_plugin = node->get_operator()->cached_plugin();
+    if (!cached_plugin) {
+        MI_LOG_ERROR("[ExecutionContext] No plugin available for node: " + node->name());
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
+
+    operators::PluginContext plugin_ctx;
+    plugin_ctx.device_context = context.get();
+    return cached_plugin->enqueue(merged_inputs, output_tensors, plugin_ctx);
 }
 
 std::shared_ptr<backends::DeviceContext> ExecutionContext::get_or_create_context(

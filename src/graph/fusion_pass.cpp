@@ -5,7 +5,8 @@
 
 #include "mini_infer/core/op_type.h"
 #include "mini_infer/operators/activation_type.h"
-#include "mini_infer/operators/conv2d.h"
+#include "mini_infer/operators/generic_operator.h"
+#include "mini_infer/operators/plugin_base.h"
 #include "mini_infer/utils/logger.h"
 
 namespace mini_infer {
@@ -106,14 +107,18 @@ bool FusionPass::try_fuse_conv_activation(Graph* graph, std::shared_ptr<Node> co
         return false;
     }
 
-    // Check: Valid Conv2D operator
-    auto conv_op = std::dynamic_pointer_cast<operators::Conv2D>(conv_node->get_operator());
-    if (!conv_op) {
+    // Check: Valid GenericOperator with Conv2D type
+    auto generic_op = std::dynamic_pointer_cast<operators::GenericOperator>(conv_node->get_operator());
+    if (!generic_op || generic_op->type() != core::OpType::kCONVOLUTION) {
         return false;
     }
 
-    // TensorRT-style: Set activation on Conv2D
-    conv_op->set_activation(act_type);
+    // TensorRT-style: Set activation on Conv2D parameter
+    auto conv_param = std::dynamic_pointer_cast<operators::Conv2DParam>(generic_op->plugin_param());
+    if (!conv_param) {
+        return false;
+    }
+    conv_param->activation = act_type;
 
     MI_LOG_INFO("[FusionPass] Fused: " + conv_node->name() + " + " +
                 std::string(activation_node->type_name()));

@@ -4,12 +4,8 @@
 #include "importers/internal/attribute_helper.h"
 #include "importers/internal/weight_importer.h"
 #include "mini_infer/utils/logger.h"
-#include "mini_infer/operators/conv2d.h"
-#include "mini_infer/operators/linear.h"
-#include "mini_infer/operators/pooling.h"
-#include "mini_infer/operators/relu.h"
-#include "mini_infer/operators/flatten.h"
-#include "mini_infer/operators/reshape.h"
+#include "mini_infer/operators/generic_operator.h"
+#include "mini_infer/operators/plugin_base.h"
 #include "onnx.pb.h"
 
 namespace mini_infer {
@@ -98,20 +94,21 @@ core::Status ConvImporter::import_operator(ImporterContext& ctx, const onnx::Nod
                  std::to_string(stride_h) + "x" + std::to_string(stride_w) + "]");
     
     // Create Conv2D parameter
-    operators::Conv2DParam param;
-    param.kernel_h = kernel_h;
-    param.kernel_w = kernel_w;
-    param.stride_h = stride_h;
-    param.stride_w = stride_w;
-    param.padding_h = padding_h;
-    param.padding_w = padding_w;
-    param.dilation_h = dilation_h;
-    param.dilation_w = dilation_w;
-    param.groups = static_cast<int>(group);
-    param.use_bias = use_bias;
+    auto param = std::make_shared<operators::Conv2DParam>();
+    param->kernel_h = kernel_h;
+    param->kernel_w = kernel_w;
+    param->stride_h = stride_h;
+    param->stride_w = stride_w;
+    param->padding_h = padding_h;
+    param->padding_w = padding_w;
+    param->dilation_h = dilation_h;
+    param->dilation_w = dilation_w;
+    param->groups = static_cast<int>(group);
+    param->use_bias = use_bias;
     
-    // Create operator
-    auto op = std::make_shared<operators::Conv2D>(param);
+    // Create operator with plugin parameter
+    auto op = std::make_shared<operators::GenericOperator>("Conv", core::OpType::kCONVOLUTION);
+    op->set_plugin_param(param);
     
     // Create node
     const std::string& node_name = node.output(0);  // Use first output as node name
@@ -174,10 +171,11 @@ core::Status GemmImporter::import_operator(ImporterContext& ctx, const onnx::Nod
     // Note: ONNX Gemm: Y = alpha * A @ B^T + beta * C (when transB=1)
     // Mini-Infer Linear: Y = A @ W^T + bias
     if (transA == 0 && transB == 1 && alpha == 1.0f && beta == 1.0f) {
-        // Create Linear operator
-        operators::LinearParam param;
-        param.use_bias = use_bias;
-        auto op = std::make_shared<operators::Linear>(param);
+        // Create Linear operator with plugin parameter
+        auto param = std::make_shared<operators::LinearParam>();
+        param->use_bias = use_bias;
+        auto op = std::make_shared<operators::GenericOperator>("Gemm", core::OpType::kGEMM);
+        op->set_plugin_param(param);
         
         const std::string& node_name = node.output(0);
         auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -228,9 +226,10 @@ core::Status MatMulImporter::import_operator(ImporterContext& ctx, const onnx::N
     }
     
     // MatMul: Y = A @ B, can be implemented using Linear without bias
-    operators::LinearParam param;
-    param.use_bias = false;
-    auto op = std::make_shared<operators::Linear>(param);
+    auto param = std::make_shared<operators::LinearParam>();
+    param->use_bias = false;
+    auto op = std::make_shared<operators::GenericOperator>("MatMul", core::OpType::kLINEAR);
+    op->set_plugin_param(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -276,7 +275,7 @@ core::Status ReluImporter::import_operator(ImporterContext& ctx, const onnx::Nod
     }
     
     // Create ReLU operator
-    auto op = std::make_shared<operators::ReLU>();
+    auto op = std::make_shared<operators::GenericOperator>("Relu", core::OpType::kRELU);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -335,17 +334,18 @@ core::Status MaxPoolImporter::import_operator(ImporterContext& ctx, const onnx::
                  std::to_string(stride_h) + "x" + std::to_string(stride_w) + "]");
     
     // Create Pooling parameter
-    operators::PoolingParam param;
-    param.type = operators::PoolingType::MAX;
-    param.kernel_h = kernel_h;
-    param.kernel_w = kernel_w;
-    param.stride_h = stride_h;
-    param.stride_w = stride_w;
-    param.padding_h = padding_h;
-    param.padding_w = padding_w;
+    auto param = std::make_shared<operators::PoolingParam>();
+    param->type = operators::PoolingType::MAX;
+    param->kernel_h = kernel_h;
+    param->kernel_w = kernel_w;
+    param->stride_h = stride_h;
+    param->stride_w = stride_w;
+    param->padding_h = padding_h;
+    param->padding_w = padding_w;
     
-    // Create operator
-    auto op = std::make_shared<operators::Pooling>(param);
+    // Create operator with plugin parameter
+    auto op = std::make_shared<operators::GenericOperator>("MaxPool", core::OpType::kMAX_POOL);
+    op->set_plugin_param(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -403,17 +403,18 @@ core::Status AveragePoolImporter::import_operator(ImporterContext& ctx, const on
                  "x" + std::to_string(kernel_w) + "]");
     
     // Create Pooling parameter
-    operators::PoolingParam param;
-    param.type = operators::PoolingType::AVERAGE;
-    param.kernel_h = kernel_h;
-    param.kernel_w = kernel_w;
-    param.stride_h = stride_h;
-    param.stride_w = stride_w;
-    param.padding_h = padding_h;
-    param.padding_w = padding_w;
+    auto param = std::make_shared<operators::PoolingParam>();
+    param->type = operators::PoolingType::AVERAGE;
+    param->kernel_h = kernel_h;
+    param->kernel_w = kernel_w;
+    param->stride_h = stride_h;
+    param->stride_w = stride_w;
+    param->padding_h = padding_h;
+    param->padding_w = padding_w;
     
-    // Create operator
-    auto op = std::make_shared<operators::Pooling>(param);
+    // Create operator with plugin parameter
+    auto op = std::make_shared<operators::GenericOperator>("AveragePool", core::OpType::kAVERAGE_POOL);
+    op->set_plugin_param(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -512,8 +513,8 @@ core::Status ReshapeImporter::import_operator(ImporterContext& ctx, const onnx::
     }
     
     // Create Reshape operator
-    operators::ReshapeParam param;
-    param.allowzero = (allowzero != 0);
+    auto param = std::make_shared<operators::ReshapeParam>();
+    param->allowzero = (allowzero != 0);
     
     // Try to get shape from initializer (constant shape)
     const std::string& shape_input_name = node.input(1);
@@ -528,20 +529,21 @@ core::Status ReshapeImporter::import_operator(ImporterContext& ctx, const onnx::
         
         const int64_t* shape_data = static_cast<const int64_t*>(shape_weight->data());
         size_t shape_size = static_cast<size_t>(shape_weight->shape().numel());
-        param.shape.assign(shape_data, shape_data + shape_size);
+        param->shape.assign(shape_data, shape_data + shape_size);
         
         ctx.log_info("Reshape with constant shape: [" + 
                      [&]() {
                          std::string s;
-                         for (size_t i = 0; i < param.shape.size(); ++i) {
+                         for (size_t i = 0; i < param->shape.size(); ++i) {
                              if (i > 0) s += ", ";
-                             s += std::to_string(param.shape[i]);
+                             s += std::to_string(param->shape[i]);
                          }
                          return s;
                      }() + "]");
     }
     
-    auto op = std::make_shared<operators::Reshape>(param);
+    auto op = std::make_shared<operators::GenericOperator>("Reshape", core::OpType::kRESHAPE);
+    op->set_plugin_param(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
@@ -603,11 +605,12 @@ core::Status FlattenImporter::import_operator(ImporterContext& ctx, const onnx::
     }
     
     // Create Flatten parameter
-    operators::FlattenParam param;
-    param.axis = static_cast<int>(axis);
+    auto param = std::make_shared<operators::FlattenParam>();
+    param->axis = static_cast<int>(axis);
     
-    // Create operator
-    auto op = std::make_shared<operators::Flatten>(param);
+    // Create operator with plugin parameter
+    auto op = std::make_shared<operators::GenericOperator>("Flatten", core::OpType::kFLATTEN);
+    op->set_plugin_param(param);
     
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);

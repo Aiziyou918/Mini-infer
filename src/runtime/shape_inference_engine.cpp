@@ -156,9 +156,18 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
             return core::Status::ERROR_RUNTIME;
         }
 
-        // Infer output shapes
+        // Infer output shapes using cached plugin
         std::vector<core::Shape> output_shapes;
-        auto infer_status = op->infer_shape(input_shapes_vec, output_shapes);
+        core::Status infer_status;
+
+        auto* plugin = op->cached_plugin();
+        if (plugin) {
+            infer_status = plugin->infer_output_shapes(input_shapes_vec, output_shapes);
+        } else {
+            MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() +
+                         "': No plugin available for shape inference");
+            return core::Status::ERROR_NOT_IMPLEMENTED;
+        }
 
         if (infer_status != core::Status::SUCCESS || output_shapes.empty()) {
             MI_LOG_ERROR("[ShapeInferenceEngine] Node '" + node->name() +
