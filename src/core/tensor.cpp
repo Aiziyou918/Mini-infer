@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "mini_infer/core/allocator.h"
+#include "mini_infer/utils/logger.h"
 
 #ifdef MINI_INFER_USE_CUDA
 #include <cuda_runtime.h>
@@ -101,7 +102,10 @@ void Storage::reset(size_t capacity_bytes, DeviceType device, size_t alignment) 
     // Zero-initialize memory based on device type
 #ifdef MINI_INFER_USE_CUDA
     if (device == DeviceType::CUDA) {
-        cudaMemset(ptr, 0, aligned_bytes);
+        cudaError_t status = cudaMemset(ptr, 0, aligned_bytes);
+        if (status != cudaSuccess) {
+            MI_LOG_ERROR("[Tensor] cudaMemset failed: " + std::string(cudaGetErrorString(status)));
+        }
     } else
 #endif
     {
@@ -215,7 +219,10 @@ void Tensor::ensure_contiguous_storage(size_t new_size_bytes) {
         if (copy_size > 0) {
 #ifdef MINI_INFER_USE_CUDA
             if (device_ == DeviceType::CUDA) {
-                cudaMemcpy(new_storage->data(), data(), copy_size, cudaMemcpyDeviceToDevice);
+                cudaError_t status = cudaMemcpy(new_storage->data(), data(), copy_size, cudaMemcpyDeviceToDevice);
+                if (status != cudaSuccess) {
+                    MI_LOG_ERROR("[Tensor] cudaMemcpy failed: " + std::string(cudaGetErrorString(status)));
+                }
             } else
 #endif
             {
@@ -241,7 +248,10 @@ void Tensor::resize(const Shape& new_shape) {
         if (ptr) {
 #ifdef MINI_INFER_USE_CUDA
             if (device_ == DeviceType::CUDA) {
-                cudaMemset(ptr + old_size, 0, new_size - old_size);
+                cudaError_t status = cudaMemset(ptr + old_size, 0, new_size - old_size);
+                if (status != cudaSuccess) {
+                    MI_LOG_ERROR("[Tensor] cudaMemset failed: " + std::string(cudaGetErrorString(status)));
+                }
             } else
 #endif
             {

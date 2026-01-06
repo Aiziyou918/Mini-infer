@@ -8,11 +8,10 @@
 #include "mini_infer/core/tensor.h"
 #include "mini_infer/core/allocator.h"
 #include "mini_infer/runtime/shape_inference_engine.h"
+#include "mini_infer/runtime/inference_plan.h"
 
 namespace mini_infer {
 namespace runtime {
-
-class InferencePlan;
 
 /**
  * @brief Execution Context
@@ -71,7 +70,10 @@ class ExecutionContext {
     size_t shared_buffer_size_{0};
     std::shared_ptr<core::Allocator> cuda_allocator_;  // Keep CUDA allocator alive for shared_buffer_
 #ifdef MINI_INFER_USE_CUDA
-    std::unordered_map<const core::Tensor*, std::shared_ptr<core::Tensor>> gpu_constant_cache_;
+    std::unordered_map<std::shared_ptr<const core::Tensor>,
+                       std::shared_ptr<core::Tensor>,
+                       TensorPtrHash,
+                       TensorPtrEqual> gpu_constant_cache_;
 #endif
     std::unordered_map<core::DeviceType, std::shared_ptr<backends::DeviceContext>> contexts_;
     std::unique_ptr<ShapeInferenceEngine> shape_inference_engine_;

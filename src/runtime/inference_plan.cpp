@@ -10,6 +10,7 @@
 #ifdef MINI_INFER_USE_CUDA
 #include <cuda_runtime.h>
 #include "mini_infer/backends/cuda/cuda_allocator.h"
+#include "mini_infer/backends/cuda/cuda_device_context.h"
 #endif
 
 namespace mini_infer {
@@ -644,19 +645,21 @@ core::Status InferencePlan::bind_ordered_inputs(
                                                             core::DeviceType::CUDA);
             }
 
-            // Copy data from CPU to GPU
-            // Note: cudaMemcpy is synchronous on the host but may not synchronize with
-            // non-blocking streams. Use cudaDeviceSynchronize to ensure data is ready
-            // before kernels on custom streams access it.
+            // Get CUDA stream from execution context for async copy
+            auto cuda_ctx = std::dynamic_pointer_cast<backends::cuda::CUDADeviceContext>(
+                ctx->get_or_create_context(core::DeviceType::CUDA));
+            cudaStream_t stream = cuda_ctx ? cuda_ctx->stream() : nullptr;
+
+            // Copy data from CPU to GPU using stream-based async copy
             size_t size_bytes = tensor->size_in_bytes();
-            cudaError_t status = cudaMemcpy(outputs[0]->data(), tensor->data(), size_bytes, cudaMemcpyHostToDevice);
+            cudaError_t status = cudaMemcpyAsync(outputs[0]->data(), tensor->data(), size_bytes,
+                                                  cudaMemcpyHostToDevice, stream);
             if (status != cudaSuccess) {
                 MI_LOG_ERROR("[InferencePlan] Failed to copy input '" + binding.name +
                              "' to GPU: " + std::string(cudaGetErrorString(status)));
                 return core::Status::ERROR_RUNTIME;
             }
-            // Synchronize to ensure input data is fully copied before kernel execution
-            cudaDeviceSynchronize();
+            // Note: Stream synchronization happens implicitly when kernels execute on the same stream
         } else
 #endif
         {
@@ -845,7 +848,8 @@ std::vector<std::string> InferencePlan::get_output_names() const {
     return {};
 }
 
-std::shared_ptr<core::Tensor> InferencePlan::get_gpu_tensor(const core::Tensor* cpu_tensor) const {
+std::shared_ptr<core::Tensor> InferencePlan::get_gpu_tensor(
+    const std::shared_ptr<const core::Tensor>& cpu_tensor) const {
     if (!cpu_tensor) {
         return nullptr;
     }
@@ -886,7 +890,7 @@ core::Status InferencePlan::preload_weights_to_gpu() {
             }
 
             // Skip if already cached
-            if (gpu_weight_cache_.find(tensor.get()) != gpu_weight_cache_.end()) {
+            if (gpu_weight_cache_.find(tensor) != gpu_weight_cache_.end()) {
                 continue;
             }
 
@@ -905,7 +909,7 @@ core::Status InferencePlan::preload_weights_to_gpu() {
             }
 
             // Cache the GPU tensor
-            gpu_weight_cache_[tensor.get()] = gpu_tensor;
+            gpu_weight_cache_[tensor] = gpu_tensor;
             total_weight_bytes += size_bytes;
             weight_count++;
 

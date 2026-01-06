@@ -140,7 +140,12 @@ core::Status ExecutionContext::prepare_memory_pools(bool use_memory_pools) {
             return core::Status::ERROR_RUNTIME;
         }
         // Zero-initialize CUDA memory
-        cudaMemset(raw, 0, shared_buffer_size_);
+        cudaError_t cuda_status = cudaMemset(raw, 0, shared_buffer_size_);
+        if (cuda_status != cudaSuccess) {
+            MI_LOG_ERROR("[ExecutionContext] cudaMemset failed: " +
+                         std::string(cudaGetErrorString(cuda_status)));
+            return core::Status::ERROR_RUNTIME;
+        }
         // Store allocator to prevent destruction before buffer is freed
         cuda_allocator_ = cuda_allocator;
         shared_buffer_.reset(raw, [allocator = cuda_allocator](void* p) {
@@ -370,14 +375,14 @@ core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& 
             }
 
             // TensorRT-style: First check if weight was preloaded at build time
-            auto preloaded = plan_->get_gpu_tensor(tensor.get());
+            auto preloaded = plan_->get_gpu_tensor(tensor);
             if (preloaded) {
                 tensor = preloaded;
                 return core::Status::SUCCESS;
             }
 
             // Fallback: Check local cache (for dynamically created tensors)
-            auto cache_it = gpu_constant_cache_.find(tensor.get());
+            auto cache_it = gpu_constant_cache_.find(tensor);
             if (cache_it != gpu_constant_cache_.end() && cache_it->second) {
                 tensor = cache_it->second;
                 return core::Status::SUCCESS;
@@ -394,7 +399,7 @@ core::Status ExecutionContext::execute_node(const std::shared_ptr<graph::Node>& 
                              "' input to GPU: " + std::string(cudaGetErrorString(status)));
                 return core::Status::ERROR_RUNTIME;
             }
-            gpu_constant_cache_[tensor.get()] = gpu_tensor;
+            gpu_constant_cache_[tensor] = gpu_tensor;
             tensor = gpu_tensor;
             return core::Status::SUCCESS;
         };

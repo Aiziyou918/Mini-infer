@@ -21,6 +21,25 @@ namespace runtime {
 class ExecutionContext;
 
 /**
+ * @brief Hash function for shared_ptr<const core::Tensor>
+ */
+struct TensorPtrHash {
+    size_t operator()(const std::shared_ptr<const core::Tensor>& ptr) const {
+        return std::hash<const core::Tensor*>{}(ptr.get());
+    }
+};
+
+/**
+ * @brief Equality comparator for shared_ptr<const core::Tensor>
+ */
+struct TensorPtrEqual {
+    bool operator()(const std::shared_ptr<const core::Tensor>& lhs,
+                    const std::shared_ptr<const core::Tensor>& rhs) const {
+        return lhs.get() == rhs.get();
+    }
+};
+
+/**
  * @brief Config Inference Plan (TensorRT-style)
  */
 struct EngineConfig {
@@ -113,7 +132,8 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
      * @param cpu_tensor The original CPU tensor
      * @return GPU tensor if available, nullptr otherwise
      */
-    std::shared_ptr<core::Tensor> get_gpu_tensor(const core::Tensor* cpu_tensor) const;
+    std::shared_ptr<core::Tensor> get_gpu_tensor(
+        const std::shared_ptr<const core::Tensor>& cpu_tensor) const;
 
    private:
     friend class ExecutionContext;
@@ -127,7 +147,10 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
     std::vector<InputBinding> input_bindings_;
 
     // TensorRT-style: GPU weights preloaded at build time
-    std::unordered_map<const core::Tensor*, std::shared_ptr<core::Tensor>> gpu_weight_cache_;
+    std::unordered_map<std::shared_ptr<const core::Tensor>,
+                       std::shared_ptr<core::Tensor>,
+                       TensorPtrHash,
+                       TensorPtrEqual> gpu_weight_cache_;
     std::shared_ptr<core::Allocator> cuda_allocator_;  // Keep CUDA allocator alive
 
     core::Status optimize_graph();
