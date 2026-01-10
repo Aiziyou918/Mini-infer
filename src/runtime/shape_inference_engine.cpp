@@ -209,20 +209,25 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
 }
 
 const core::Shape* ShapeInferenceEngine::get_inferred_shape(const std::string& tensor_name) const {
-    // Find node by name (only used during shape change handling, not hot path)
+    // Find node by name (fallback for legacy code)
     auto node = graph_->get_node(tensor_name);
     if (!node) {
         return nullptr;
     }
+    return get_inferred_shape(node->id(), 0);
+}
 
-    size_t node_id = node->id();
+const core::Shape* ShapeInferenceEngine::get_inferred_shape(size_t node_id, size_t output_index) const {
+    // Direct O(1) access using node ID
     if (node_id >= inferred_shapes_.size() || inferred_shapes_[node_id].empty()) {
         return nullptr;
     }
 
-    // Return first output shape (for single-output nodes)
-    // TODO: Support explicit output index for multi-output nodes
-    return &inferred_shapes_[node_id][0];
+    if (output_index >= inferred_shapes_[node_id].size()) {
+        return nullptr;
+    }
+
+    return &inferred_shapes_[node_id][output_index];
 }
 
 bool ShapeInferenceEngine::shapes_changed(

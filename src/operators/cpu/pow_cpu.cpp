@@ -1,0 +1,214 @@
+#include "mini_infer/operators/cpu_plugin.h"
+#include "mini_infer/operators/plugin_registry.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
+namespace mini_infer {
+namespace operators {
+
+namespace {
+
+bool compute_broadcast_shape(
+    const core::Shape& a,
+    const core::Shape& b,
+    core::Shape& result
+) {
+    const auto& dims_a = a.dims();
+    const auto& dims_b = b.dims();
+
+    size_t ndim_a = dims_a.size();
+    size_t ndim_b = dims_b.size();
+    size_t ndim_out = std::max(ndim_a, ndim_b);
+
+    std::vector<int64_t> out_dims(ndim_out);
+
+    for (size_t i = 0; i < ndim_out; ++i) {
+        int64_t dim_a = (i < ndim_out - ndim_a) ? 1 : dims_a[i - (ndim_out - ndim_a)];
+        int64_t dim_b = (i < ndim_out - ndim_b) ? 1 : dims_b[i - (ndim_out - ndim_b)];
+
+        if (dim_a == dim_b) {
+            out_dims[i] = dim_a;
+        } else if (dim_a == 1) {
+            out_dims[i] = dim_b;
+        } else if (dim_b == 1) {
+            out_dims[i] = dim_a;
+        } else {
+            return false;
+        }
+    }
+
+    result = core::Shape(out_dims);
+    return true;
+}
+
+std::vector<int64_t> compute_broadcast_strides(
+    const core::Shape& shape,
+    const core::Shape& broadcast_shape
+) {
+    const auto& dims = shape.dims();
+    const auto& bc_dims = broadcast_shape.dims();
+
+    size_t ndim = dims.size();
+    size_t bc_ndim = bc_dims.size();
+
+    std::vector<int64_t> strides(bc_ndim, 0);
+
+    std::vector<int64_t> orig_strides(ndim);
+    int64_t stride = 1;
+    for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+        orig_strides[i] = stride;
+        stride *= dims[i];
+    }
+
+    for (size_t i = 0; i < bc_ndim; ++i) {
+        size_t orig_idx = i - (bc_ndim - ndim);
+        if (i >= bc_ndim - ndim) {
+            if (dims[orig_idx] == bc_dims[i]) {
+                strides[i] = orig_strides[orig_idx];
+            } else {
+                strides[i] = 0;
+            }
+        }
+    }
+
+    return strides;
+}
+
+void linear_to_multi_index(
+    int64_t linear_idx,
+    const std::vector<int64_t>& dims,
+    std::vector<int64_t>& multi_idx
+) {
+    size_t ndim = dims.size();
+    multi_idx.resize(ndim);
+
+    for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+        multi_idx[i] = linear_idx % dims[i];
+        linear_idx /= dims[i];
+    }
+}
+
+int64_t multi_to_linear_index(
+    const std::vector<int64_t>& multi_idx,
+    const std::vector<int64_t>& strides
+) {
+    int64_t idx = 0;
+    for (size_t i = 0; i < multi_idx.size(); ++i) {
+        idx += multi_idx[i] * strides[i];
+    }
+    return idx;
+}
+
+}  // namespace
+
+class PowCPUPlugin : public SimpleCPUPlugin<PowCPUPlugin> {
+public:
+    PowCPUPlugin() = default;
+    ~PowCPUPlugin() override = default;
+
+    const char* get_plugin_type() const noexcept override {
+        return "Pow";
+    }
+
+    core::OpType get_op_type() const noexcept override {
+        return core::OpType::kPOW;
+    }
+
+    int32_t get_nb_outputs() const noexcept override {
+        return 1;
+    }
+
+    int32_t get_nb_inputs() const noexcept override {
+        return 2;
+    }
+
+    core::Status infer_output_shapes(
+        const std::vector<core::Shape>& input_shapes,
+        std::vector<core::Shape>& output_shapes) const override {
+        if (input_shapes.size() != 2) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        output_shapes.clear();
+        core::Shape out_shape;
+        if (!compute_broadcast_shape(input_shapes[0], input_shapes[1], out_shape)) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+        output_shapes.push_back(out_shape);
+        return core::Status::SUCCESS;
+    }
+
+    core::Status enqueue(
+        const std::vector<std::shared_ptr<core::Tensor>>& inputs,
+        std::vector<std::shared_ptr<core::Tensor>>& outputs,
+        const PluginContext& context) override {
+        (void)context;
+
+        if (inputs.size() != 2 || outputs.size() != 1) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        const auto& base = inputs[0];
+        const auto& exponent = inputs[1];
+        auto& output = outputs[0];
+
+        if (!base || !exponent || !output) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        if (base->dtype() != core::DataType::FLOAT32 ||
+            exponent->dtype() != core::DataType::FLOAT32) {
+            return core::Status::ERROR_NOT_IMPLEMENTED;
+        }
+
+        const auto& shape_base = base->shape();
+        const auto& shape_exp = exponent->shape();
+        const auto& out_shape = output->shape();
+
+        const float* data_base = static_cast<const float*>(base->data());
+        const float* data_exp = static_cast<const float*>(exponent->data());
+        float* data_out = static_cast<float*>(output->data());
+
+        const int64_t total = out_shape.numel();
+
+        // Fast path: same shape
+        if (shape_base == shape_exp) {
+            for (int64_t i = 0; i < total; ++i) {
+                data_out[i] = std::pow(data_base[i], data_exp[i]);
+            }
+            return core::Status::SUCCESS;
+        }
+
+        // Fast path: scalar exponent
+        if (shape_exp.numel() == 1) {
+            float exp_val = data_exp[0];
+            for (int64_t i = 0; i < total; ++i) {
+                data_out[i] = std::pow(data_base[i], exp_val);
+            }
+            return core::Status::SUCCESS;
+        }
+
+        // General broadcast path
+        auto strides_base = compute_broadcast_strides(shape_base, out_shape);
+        auto strides_exp = compute_broadcast_strides(shape_exp, out_shape);
+
+        const auto& out_dims = out_shape.dims();
+        std::vector<int64_t> multi_idx;
+
+        for (int64_t i = 0; i < total; ++i) {
+            linear_to_multi_index(i, out_dims, multi_idx);
+            int64_t idx_base = multi_to_linear_index(multi_idx, strides_base);
+            int64_t idx_exp = multi_to_linear_index(multi_idx, strides_exp);
+            data_out[i] = std::pow(data_base[idx_base], data_exp[idx_exp]);
+        }
+
+        return core::Status::SUCCESS;
+    }
+};
+
+REGISTER_PLUGIN_SIMPLE(PowCPUPlugin, "Pow", kPOW, CPU)
+
+}  // namespace operators
+}  // namespace mini_infer

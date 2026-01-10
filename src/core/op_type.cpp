@@ -27,6 +27,7 @@ const std::unordered_map<std::string, OpType> kStringToOpTypeMap = {
     {op_names::kLeakyRelu, OpType::kLEAKY_RELU},
     {op_names::kPRelu, OpType::kPRELU},
     {op_names::kElu, OpType::kELU},
+    {op_names::kGelu, OpType::kGELU},
 
     // Pooling
     {op_names::kMaxPool, OpType::kMAX_POOL},
@@ -53,6 +54,7 @@ const std::unordered_map<std::string, OpType> kStringToOpTypeMap = {
     {op_names::kUnsqueeze, OpType::kUNSQUEEZE},
     {op_names::kConcat, OpType::kCONCAT},
     {op_names::kSplit, OpType::kSPLIT},
+    {op_names::kShape, OpType::kSHAPE},
 
     // Element-wise
     {op_names::kAdd, OpType::kADD},
@@ -71,6 +73,16 @@ const std::unordered_map<std::string, OpType> kStringToOpTypeMap = {
     {op_names::kCast, OpType::kCAST},
     {op_names::kPad, OpType::kPADDING},
     {op_names::kSlice, OpType::kSLICE},
+    {op_names::kGather, OpType::kGATHER},
+    {op_names::kSqrt, OpType::kSQRT},
+    {op_names::kErf, OpType::kERF},
+    {op_names::kPow, OpType::kPOW},
+
+    // Comparison and Logical
+    {"Equal", OpType::kEQUAL},
+    {"Where", OpType::kWHERE},
+    {"Expand", OpType::kEXPAND},
+    {"ConstantOfShape", OpType::kCONSTANT_OF_SHAPE},
 };
 
 // Static mapping table: OpType -> String
@@ -87,6 +99,7 @@ const std::unordered_map<OpType, const char*> kOpTypeToStringMap = {
     {OpType::kLEAKY_RELU, op_names::kLeakyRelu},
     {OpType::kPRELU, op_names::kPRelu},
     {OpType::kELU, op_names::kElu},
+    {OpType::kGELU, op_names::kGelu},
 
     // Pooling
     {OpType::kMAX_POOL, op_names::kMaxPool},
@@ -113,6 +126,7 @@ const std::unordered_map<OpType, const char*> kOpTypeToStringMap = {
     {OpType::kUNSQUEEZE, op_names::kUnsqueeze},
     {OpType::kCONCAT, op_names::kConcat},
     {OpType::kSPLIT, op_names::kSplit},
+    {OpType::kSHAPE, op_names::kShape},
 
     // Element-wise
     {OpType::kADD, op_names::kAdd},
@@ -131,6 +145,16 @@ const std::unordered_map<OpType, const char*> kOpTypeToStringMap = {
     {OpType::kCAST, op_names::kCast},
     {OpType::kPADDING, op_names::kPad},
     {OpType::kSLICE, op_names::kSlice},
+    {OpType::kGATHER, op_names::kGather},
+    {OpType::kSQRT, op_names::kSqrt},
+    {OpType::kERF, op_names::kErf},
+    {OpType::kPOW, op_names::kPow},
+
+    // Comparison and Logical
+    {OpType::kEQUAL, "Equal"},
+    {OpType::kWHERE, "Where"},
+    {OpType::kEXPAND, "Expand"},
+    {OpType::kCONSTANT_OF_SHAPE, "ConstantOfShape"},
 
     // Special cases
     {OpType::kCUSTOM, "Custom"},

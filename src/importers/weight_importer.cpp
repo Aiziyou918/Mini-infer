@@ -17,21 +17,24 @@ std::shared_ptr<core::Tensor> WeightImporter::import_tensor(
     for (int i = 0; i < tensor_proto.dims_size(); ++i) {
         dims.push_back(tensor_proto.dims(i));
     }
+
+    // Note: Empty dims means scalar (0-dimensional tensor with 1 element)
+    // We keep the empty dims to preserve correct shape semantics
     core::Shape shape(dims);
-    
+
     // 2. Convert data type
     core::DataType dtype = convert_data_type(tensor_proto.data_type(), error_message);
     if (!error_message.empty()) {
         return nullptr;
     }
-    
+
     // 3. Create tensor
     auto tensor = std::make_shared<core::Tensor>(shape, dtype);
-    
+
     // 4. Import data
     void* data = tensor->data();
     size_t num_elements = tensor->shape().numel();
-    
+
     if (tensor_proto.has_raw_data()) {
         // Raw binary data (most efficient)
         size_t expected_size = num_elements * tensor->element_size();
@@ -45,7 +48,7 @@ std::shared_ptr<core::Tensor> WeightImporter::import_tensor(
             return nullptr;
         }
     }
-    
+
     return tensor;
 }
 

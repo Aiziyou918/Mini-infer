@@ -18,6 +18,33 @@ set(PLUGIN_CPU_SOURCES
     cpu/pooling_cpu.cpp
     cpu/linear_cpu.cpp
     cpu/conv2d_cpu.cpp
+    # BERT operators
+    cpu/add_cpu.cpp
+    cpu/mul_cpu.cpp
+    cpu/div_cpu.cpp
+    cpu/sqrt_cpu.cpp
+    cpu/gelu_cpu.cpp
+    cpu/transpose_cpu.cpp
+    cpu/squeeze_cpu.cpp
+    cpu/unsqueeze_cpu.cpp
+    cpu/layernorm_cpu.cpp
+    cpu/gather_cpu.cpp
+    cpu/matmul_cpu.cpp
+    cpu/shape_cpu.cpp
+    cpu/concat_cpu.cpp
+    # Additional BERT operators (LayerNorm decomposition)
+    cpu/sub_cpu.cpp
+    cpu/pow_cpu.cpp
+    cpu/tanh_cpu.cpp
+    cpu/erf_cpu.cpp
+    cpu/cast_cpu.cpp
+    cpu/reduce_mean_cpu.cpp
+    cpu/slice_cpu.cpp
+    # Comparison and logical operators
+    cpu/constant_of_shape_cpu.cpp
+    cpu/equal_cpu.cpp
+    cpu/where_cpu.cpp
+    cpu/expand_cpu.cpp
 )
 
 # Plugin implementations (CUDA)
@@ -29,6 +56,26 @@ set(PLUGIN_CUDA_SOURCES
     cuda/pooling_cuda.cu
     cuda/linear_cuda.cu
     cuda/conv2d_cuda.cu
+    # BERT operators
+    cuda/add_cuda.cu
+    cuda/mul_cuda.cu
+    cuda/div_cuda.cu
+    cuda/sqrt_cuda.cu
+    cuda/gelu_cuda.cu
+    cuda/transpose_cuda.cu
+    cuda/squeeze_cuda.cu
+    cuda/unsqueeze_cuda.cu
+    cuda/layernorm_cuda.cu
+    cuda/gather_cuda.cu
+    cuda/matmul_cuda.cu
+    # Additional BERT operators (LayerNorm decomposition)
+    cuda/sub_cuda.cu
+    cuda/pow_cuda.cu
+    cuda/tanh_cuda.cu
+    cuda/erf_cuda.cu
+    cuda/cast_cuda.cu
+    cuda/reduce_mean_cuda.cu
+    cuda/slice_cuda.cu
 )
 
 # Combine sources

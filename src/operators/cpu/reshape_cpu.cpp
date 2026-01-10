@@ -46,7 +46,25 @@ public:
         int64_t total_elements = input_shape.numel();
 
         if (!param_ || param_->shape.empty()) {
-            return core::Status::ERROR_INVALID_ARGUMENT;
+            // Dynamic reshape - shape comes from input tensor at runtime
+            // Check if we have a second input (shape tensor)
+            if (input_shapes.size() >= 2) {
+                // The shape tensor tells us the output ndim
+                const auto& shape_tensor_shape = input_shapes[1];
+                if (shape_tensor_shape.ndim() == 1 && shape_tensor_shape.dims()[0] > 0) {
+                    // Output has shape_tensor_shape[0] dimensions, all dynamic
+                    int64_t out_ndim = shape_tensor_shape.dims()[0];
+                    std::vector<int64_t> dynamic_shape(out_ndim, -1);
+                    output_shapes.clear();
+                    output_shapes.push_back(core::Shape(dynamic_shape));
+                    return core::Status::SUCCESS;
+                }
+            }
+            // Fallback: use input ndim as a guess
+            output_shapes.clear();
+            std::vector<int64_t> dynamic_shape(input_shape.ndim(), -1);
+            output_shapes.push_back(core::Shape(dynamic_shape));
+            return core::Status::SUCCESS;
         }
 
         std::vector<int64_t> resolved_shape;

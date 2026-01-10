@@ -43,6 +43,7 @@ enum class OpType {
     kLEAKY_RELU,  ///< Leaky ReLU (ONNX: "LeakyRelu")
     kPRELU,       ///< Parametric ReLU (ONNX: "PRelu")
     kELU,         ///< Exponential Linear Unit (ONNX: "Elu")
+    kGELU,        ///< Gaussian Error Linear Unit (ONNX: "Gelu")
 
     // ========================================================================
     // Pooling Operations
@@ -80,6 +81,7 @@ enum class OpType {
     kCONCAT,     ///< Concatenate tensors (ONNX: "Concat")
     kSPLIT,      ///< Split tensor (ONNX: "Split")
     kSHUFFLE,    ///< Shuffle/Permute tensor
+    kSHAPE,      ///< Get tensor shape (ONNX: "Shape")
 
     // ========================================================================
     // Element-wise Operations
@@ -106,6 +108,18 @@ enum class OpType {
     kCAST,     ///< Type casting (ONNX: "Cast")
     kPADDING,  ///< Padding operation (ONNX: "Pad")
     kSLICE,    ///< Slice operation (ONNX: "Slice")
+    kGATHER,   ///< Gather operation (ONNX: "Gather")
+    kSQRT,     ///< Square root (ONNX: "Sqrt")
+    kERF,      ///< Error function (ONNX: "Erf")
+    kPOW,      ///< Element-wise power (ONNX: "Pow")
+
+    // ========================================================================
+    // Comparison and Logical Operations
+    // ========================================================================
+    kEQUAL,             ///< Element-wise equal (ONNX: "Equal")
+    kWHERE,             ///< Conditional selection (ONNX: "Where")
+    kEXPAND,            ///< Broadcast expand (ONNX: "Expand")
+    kCONSTANT_OF_SHAPE, ///< Create constant tensor (ONNX: "ConstantOfShape")
 
     // ========================================================================
     // Custom/Unknown
@@ -133,6 +147,7 @@ constexpr const char* kTanh = "Tanh";
 constexpr const char* kLeakyRelu = "LeakyRelu";
 constexpr const char* kPRelu = "PRelu";
 constexpr const char* kElu = "Elu";
+constexpr const char* kGelu = "Gelu";
 
 // Pooling
 constexpr const char* kMaxPool = "MaxPool";
@@ -159,6 +174,7 @@ constexpr const char* kSqueeze = "Squeeze";
 constexpr const char* kUnsqueeze = "Unsqueeze";
 constexpr const char* kConcat = "Concat";
 constexpr const char* kSplit = "Split";
+constexpr const char* kShape = "Shape";
 
 // Element-wise
 constexpr const char* kAdd = "Add";
@@ -177,6 +193,10 @@ constexpr const char* kSoftmax = "Softmax";
 constexpr const char* kCast = "Cast";
 constexpr const char* kPad = "Pad";
 constexpr const char* kSlice = "Slice";
+constexpr const char* kGather = "Gather";
+constexpr const char* kSqrt = "Sqrt";
+constexpr const char* kErf = "Erf";
+constexpr const char* kPow = "Pow";
 
 }  // namespace op_names
 
@@ -214,7 +234,7 @@ inline bool is_convolution(OpType op_type) {
 inline bool is_activation(OpType op_type) {
     return op_type == OpType::kRELU || op_type == OpType::kSIGMOID || op_type == OpType::kTANH ||
            op_type == OpType::kLEAKY_RELU || op_type == OpType::kPRELU || op_type == OpType::kELU ||
-           op_type == OpType::kACTIVATION;
+           op_type == OpType::kGELU || op_type == OpType::kACTIVATION;
 }
 
 /**

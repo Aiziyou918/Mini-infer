@@ -7,6 +7,7 @@
 # -----------------------
 torch>=2.0.0,<3.0.0          # PyTorch for model training and export
 torchvision>=0.15.0          # Computer vision datasets and transforms
+transformers>=4.30.0         # Hugging Face Transformers for BERT models
 
 # ONNX Support
 # ------------

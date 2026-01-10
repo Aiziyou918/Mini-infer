@@ -28,7 +28,7 @@ int64_t Shape::operator[](size_t index) const {
 
 int64_t Shape::numel() const {
     if (dims_.empty())
-        return 0;
+        return 1;  // Scalar has 1 element
     return std::accumulate(dims_.begin(), dims_.end(), 1LL, std::multiplies<int64_t>());
 }
 

@@ -46,12 +46,21 @@ class ShapeInferenceEngine {
     core::Status infer_shapes(const std::vector<RuntimeInputShape>& input_shapes);
 
     /**
-     * @brief Get inferred shape for a tensor
+     * @brief Get inferred shape for a tensor by name
      *
      * @param tensor_name Name of the tensor
      * @return Pointer to inferred shape, or nullptr if not found
      */
     const core::Shape* get_inferred_shape(const std::string& tensor_name) const;
+
+    /**
+     * @brief Get inferred shape for a tensor by node ID (O(1) access)
+     *
+     * @param node_id Node ID
+     * @param output_index Output index (default: 0)
+     * @return Pointer to inferred shape, or nullptr if not found
+     */
+    const core::Shape* get_inferred_shape(size_t node_id, size_t output_index = 0) const;
 
     /**
      * @brief Check if shapes have changed since last inference

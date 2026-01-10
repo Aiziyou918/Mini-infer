@@ -1,0 +1,78 @@
+#include "mini_infer/operators/cpu_plugin.h"
+#include "mini_infer/operators/plugin_registry.h"
+
+#include <cmath>
+
+namespace mini_infer {
+namespace operators {
+
+class ErfCPUPlugin : public SimpleCPUPlugin<ErfCPUPlugin> {
+public:
+    ErfCPUPlugin() = default;
+    ~ErfCPUPlugin() override = default;
+
+    const char* get_plugin_type() const noexcept override {
+        return "Erf";
+    }
+
+    core::OpType get_op_type() const noexcept override {
+        return core::OpType::kERF;
+    }
+
+    int32_t get_nb_outputs() const noexcept override {
+        return 1;
+    }
+
+    int32_t get_nb_inputs() const noexcept override {
+        return 1;
+    }
+
+    core::Status infer_output_shapes(
+        const std::vector<core::Shape>& input_shapes,
+        std::vector<core::Shape>& output_shapes) const override {
+        if (input_shapes.size() != 1) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        output_shapes.clear();
+        output_shapes.push_back(input_shapes[0]);
+        return core::Status::SUCCESS;
+    }
+
+    core::Status enqueue(
+        const std::vector<std::shared_ptr<core::Tensor>>& inputs,
+        std::vector<std::shared_ptr<core::Tensor>>& outputs,
+        const PluginContext& context) override {
+        (void)context;
+
+        if (inputs.size() != 1 || outputs.size() != 1) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        const auto& input = inputs[0];
+        auto& output = outputs[0];
+
+        if (!input || !output) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        if (input->dtype() != core::DataType::FLOAT32) {
+            return core::Status::ERROR_NOT_IMPLEMENTED;
+        }
+
+        const float* data_in = static_cast<const float*>(input->data());
+        float* data_out = static_cast<float*>(output->data());
+        const int64_t total = input->shape().numel();
+
+        for (int64_t i = 0; i < total; ++i) {
+            data_out[i] = std::erf(data_in[i]);
+        }
+
+        return core::Status::SUCCESS;
+    }
+};
+
+REGISTER_PLUGIN_SIMPLE(ErfCPUPlugin, "Erf", kERF, CPU)
+
+}  // namespace operators
+}  // namespace mini_infer

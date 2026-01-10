@@ -129,6 +129,100 @@ struct SoftmaxParam : public PluginParam {
 };
 
 /**
+ * @brief LayerNorm operator parameters
+ */
+struct LayerNormParam : public PluginParam {
+    float epsilon{1e-5f};
+    int64_t axis{-1};  ///< Normalization starts from this axis
+
+    LayerNormParam() = default;
+    LayerNormParam(float eps, int64_t ax) : epsilon(eps), axis(ax) {}
+};
+
+/**
+ * @brief Gather operator parameters
+ */
+struct GatherParam : public PluginParam {
+    int64_t axis{0};  ///< Axis along which to gather
+
+    GatherParam() = default;
+    explicit GatherParam(int64_t ax) : axis(ax) {}
+};
+
+/**
+ * @brief Transpose operator parameters
+ */
+struct TransposeParam : public PluginParam {
+    std::vector<int64_t> perm;  ///< Permutation of dimensions
+
+    TransposeParam() = default;
+    explicit TransposeParam(const std::vector<int64_t>& p) : perm(p) {}
+};
+
+/**
+ * @brief Squeeze operator parameters
+ */
+struct SqueezeParam : public PluginParam {
+    std::vector<int64_t> axes;  ///< Axes to squeeze (empty = all size-1 dims)
+
+    SqueezeParam() = default;
+    explicit SqueezeParam(const std::vector<int64_t>& ax) : axes(ax) {}
+};
+
+/**
+ * @brief Unsqueeze operator parameters
+ */
+struct UnsqueezeParam : public PluginParam {
+    std::vector<int64_t> axes;  ///< Axes where to insert new dimensions
+
+    UnsqueezeParam() = default;
+    explicit UnsqueezeParam(const std::vector<int64_t>& ax) : axes(ax) {}
+};
+
+/**
+ * @brief ReduceMean operator parameters
+ */
+struct ReduceMeanParam : public PluginParam {
+    std::vector<int64_t> axes;  ///< Axes along which to reduce
+    bool keepdims{true};        ///< Whether to keep reduced dimensions
+
+    ReduceMeanParam() = default;
+    ReduceMeanParam(const std::vector<int64_t>& ax, bool kd) : axes(ax), keepdims(kd) {}
+};
+
+/**
+ * @brief Cast operator parameters
+ */
+struct CastParam : public PluginParam {
+    int32_t to_dtype{1};  ///< Target data type (ONNX TensorProto.DataType)
+
+    CastParam() = default;
+    explicit CastParam(int32_t dtype) : to_dtype(dtype) {}
+};
+
+/**
+ * @brief Slice operator parameters
+ */
+struct SliceParam : public PluginParam {
+    std::vector<int64_t> starts;  ///< Starting indices
+    std::vector<int64_t> ends;    ///< Ending indices
+    std::vector<int64_t> axes;    ///< Axes to slice (empty = all axes)
+    std::vector<int64_t> steps;   ///< Step values (empty = all 1s)
+
+    SliceParam() = default;
+};
+
+/**
+ * @brief Concat operator parameters
+ */
+struct ConcatParam : public PluginParam {
+    int64_t axis{0};  ///< Axis along which to concatenate
+
+    ConcatParam() = default;
+    explicit ConcatParam(int64_t ax) : axis(ax) {}
+};
+
+/**
  * @brief Abstract base class for all plugins
  *
  * Inspired by TensorRT's IPluginV2 interface.

@@ -45,3 +45,4 @@ class GenericOperator : public Operator {
 }  // namespace operators
 }  // namespace mini_infer
 
+
