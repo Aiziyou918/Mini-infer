@@ -22,7 +22,7 @@ target_include_directories(mini_infer_backends
 
 target_link_libraries(mini_infer_backends
     PUBLIC
-        mini_infer_core
+        Threads::Threads
 )
 
 # Add CUDA support if enabled

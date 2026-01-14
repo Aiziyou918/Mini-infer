@@ -18,6 +18,7 @@ target_link_libraries(mini_infer_graph
     PUBLIC
         mini_infer_core
         mini_infer_operators
+        mini_infer_utils
 )
 
 # Interface target that keeps graph passes even in static builds
