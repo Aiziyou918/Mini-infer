@@ -1,10 +1,12 @@
 #include "mini_infer/runtime/inference_plan.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "mini_infer/operators/plugin_registry.h"
 #include "mini_infer/operators/generic_operator.h"
 #include "mini_infer/runtime/execution_context.h"
+#include "mini_infer/runtime/shape_tensor_evaluator.h"
 #include "mini_infer/utils/logger.h"
 
 #ifdef MINI_INFER_USE_CUDA
@@ -153,6 +155,27 @@ core::Status InferencePlan::execute(ExecutionContext* ctx) const {
     }
 
     if (config_.enable_dynamic_shapes && ctx->shape_inference_engine_) {
+        if (!ctx->shape_inference_engine_->has_cache()) {
+            bool matches_build = true;
+            for (size_t idx = 0; idx < input_bindings_.size(); ++idx) {
+                const auto& binding = input_bindings_[idx];
+                if (!binding.node || binding.node->output_tensors().empty() ||
+                    !binding.node->output_tensors()[0]) {
+                    matches_build = false;
+                    break;
+                }
+                const auto& expected = binding.node->output_tensors()[0]->shape();
+                const auto& actual = runtime_input_shapes[idx].shape;
+                if (expected != actual) {
+                    matches_build = false;
+                    break;
+                }
+            }
+            if (matches_build) {
+                ctx->shape_inference_engine_->seed_input_shapes(runtime_input_shapes);
+            }
+        }
+
         if (check_shape_change(ctx, runtime_input_shapes)) {
             MI_LOG_INFO("[InferencePlan] Input shape changed, re-inferring shapes...");
             status = handle_shape_change(ctx, runtime_input_shapes);
@@ -202,6 +225,24 @@ core::Status InferencePlan::optimize_graph() {
 core::Status InferencePlan::infer_shapes() {
     int total_inferred = 0;
 
+    // TensorRT-style: Use ShapeTensorEvaluator for shape tensor evaluation
+    // This separates shape tensor evaluation from regular shape inference
+    ShapeTensorEvaluator shape_evaluator;
+    shape_evaluator.initialize(graph_);
+    shape_evaluator.seed_from_initializers();
+
+    // Build input shapes map for shape tensor evaluation
+    std::unordered_map<std::string, core::Shape> input_shapes_map;
+    for (const auto& binding : input_bindings_) {
+        if (binding.node && !binding.node->output_tensors().empty() &&
+            binding.node->output_tensors()[0]) {
+            input_shapes_map[binding.name] = binding.node->output_tensors()[0]->shape();
+        }
+    }
+
+    // Initial shape tensor evaluation pass
+    shape_evaluator.evaluate(input_shapes_map);
+
     for (const auto& node : sorted_nodes_) {
         if (!node) {
             continue;
@@ -244,6 +285,36 @@ core::Status InferencePlan::infer_shapes() {
         }
 
         const auto& imported_inputs = node->input_tensors();
+        if (!imported_inputs.empty()) {
+            if (graph_input_count > 0) {
+                const size_t limit = std::min(imported_inputs.size(), input_shapes.size());
+                for (size_t i = 0; i < limit; ++i) {
+                    if (input_shapes[i].ndim() == 0 && imported_inputs[i]) {
+                        input_shapes[i] = imported_inputs[i]->shape();
+                        input_dtypes[i] = imported_inputs[i]->dtype();
+                    }
+                }
+            } else {
+                bool has_missing_shape = false;
+                for (const auto& shape : input_shapes) {
+                    if (shape.ndim() == 0) {
+                        has_missing_shape = true;
+                        break;
+                    }
+                }
+                if (has_missing_shape) {
+                    input_shapes.clear();
+                    input_dtypes.clear();
+                    for (const auto& tensor : imported_inputs) {
+                        if (tensor) {
+                            input_shapes.push_back(tensor->shape());
+                            input_dtypes.push_back(tensor->dtype());
+                        }
+                    }
+                }
+            }
+        }
+
         for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
             if (imported_inputs[i]) {
                 input_shapes.push_back(imported_inputs[i]->shape());
@@ -278,8 +349,59 @@ core::Status InferencePlan::infer_shapes() {
                 plugin->set_param(generic_op->plugin_param());
             }
 
-            status = plugin->infer_output_metadata(input_shapes, input_dtypes,
-                                                   output_shapes, output_dtypes);
+            // Build input tensors list for shape inference with tensor values
+            std::vector<std::shared_ptr<core::Tensor>> input_tensors_for_inference;
+            input_tensors_for_inference.resize(input_shapes.size());
+
+            // First, fill from graph edges (output tensors of predecessor nodes)
+            // Priority: shape_values from evaluator > output_tensors with data > output_tensors without data
+            for (const auto& edge : input_edges) {
+                if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
+                    continue;
+                }
+                const size_t dst_index = static_cast<size_t>(edge.dst_port);
+                if (dst_index >= input_tensors_for_inference.size()) {
+                    continue;
+                }
+
+                // Check shape_values from evaluator first (TensorRT-style)
+                auto* shape_value = shape_evaluator.get_shape_value(edge.node->id());
+                if (shape_value && shape_value->is_valid) {
+                    // Create a tensor from shape_value
+                    core::Shape sv_shape({static_cast<int64_t>(shape_value->data.size())});
+                    auto sv_tensor = std::make_shared<core::Tensor>(
+                        sv_shape, shape_value->dtype, core::DeviceType::CPU);
+                    if (shape_value->dtype == core::DataType::INT64) {
+                        std::memcpy(sv_tensor->data(), shape_value->data.data(),
+                                    shape_value->data.size() * sizeof(int64_t));
+                    } else if (shape_value->dtype == core::DataType::INT32) {
+                        int32_t* dst = static_cast<int32_t*>(sv_tensor->data());
+                        for (size_t i = 0; i < shape_value->data.size(); ++i) {
+                            dst[i] = static_cast<int32_t>(shape_value->data[i]);
+                        }
+                    }
+                    input_tensors_for_inference[dst_index] = sv_tensor;
+                    continue;
+                }
+
+                // Fall back to output tensors
+                const auto& outputs = edge.node->output_tensors();
+                const size_t src_index = static_cast<size_t>(edge.src_port);
+                if (src_index < outputs.size() && outputs[src_index]) {
+                    input_tensors_for_inference[dst_index] = outputs[src_index];
+                }
+            }
+
+            // Then, fill from imported inputs (constants/weights)
+            for (size_t i = 0; i < imported_inputs.size() && i < input_tensors_for_inference.size(); ++i) {
+                if (!input_tensors_for_inference[i] && imported_inputs[i]) {
+                    input_tensors_for_inference[i] = imported_inputs[i];
+                }
+            }
+
+            status = plugin->infer_output_shapes_with_tensors(input_shapes, input_dtypes,
+                                                              input_tensors_for_inference,
+                                                              output_shapes, output_dtypes);
         } else {
             MI_LOG_ERROR("[InferencePlan] No plugin available for node: " + node->name());
             return core::Status::ERROR_NOT_IMPLEMENTED;
@@ -321,6 +443,15 @@ core::Status InferencePlan::infer_shapes() {
                 MI_LOG_INFO("[InferencePlan] Node " + node->name() + " output[" +
                             std::to_string(i) + "] shape: " + output_shapes[i].to_string());
             }
+        }
+
+        // After inferring this node's output shape, update input_shapes_map and
+        // re-evaluate shape tensors that might depend on this node's output shape
+        if (!output_shapes.empty() && output_shapes[0].ndim() > 0) {
+            input_shapes_map[node->name()] = output_shapes[0];
+            // Re-evaluate shape tensors - this handles Shape nodes that depend on
+            // execution tensors whose shapes are now known
+            shape_evaluator.evaluate(input_shapes_map);
         }
 
         // Cache plugin for execution
@@ -773,6 +904,7 @@ core::Status InferencePlan::handle_shape_change(
     }
 
     size_t resized = 0;
+    size_t allocated = 0;
     for (const auto& node : sorted_nodes_) {
         if (!node) {
             continue;
@@ -780,55 +912,84 @@ core::Status InferencePlan::handle_shape_change(
         if (graph_ && graph_->is_input(node->name())) {
             continue;
         }
-        auto inferred = ctx->shape_inference_engine_->get_inferred_shape(node->name());
-        if (!inferred) {
+
+        // Get all inferred output shapes for this node
+        size_t node_id = node->id();
+        if (node_id >= ctx->node_outputs_.size()) {
             continue;
         }
 
-        if (node->id() >= ctx->node_outputs_.size()) {
+        // Get inferred shapes from ShapeInferenceEngine (supports multiple outputs)
+        const auto* inferred_shapes = ctx->shape_inference_engine_->get_inferred_shapes(node_id);
+        if (!inferred_shapes || inferred_shapes->empty()) {
             continue;
         }
-        auto& outputs = ctx->node_outputs_[node->id()];
-        if (outputs.empty() || !outputs[0]) {
-            continue;
+
+        auto& outputs = ctx->node_outputs_[node_id];
+
+        // Ensure outputs vector has enough slots
+        if (outputs.size() < inferred_shapes->size()) {
+            outputs.resize(inferred_shapes->size());
         }
 
-        if (outputs[0]->shape() != *inferred) {
-            if (config_.enable_memory_planning) {
-                const size_t required =
-                    static_cast<size_t>(inferred->numel()) * outputs[0]->element_size();
-                size_t available = outputs[0]->capacity();
-                if (outputs[0]->storage_offset() >= available) {
-                    available = 0;
-                } else {
-                    available -= outputs[0]->storage_offset();
-                }
+        // Get dtype from node's output tensors (set during build-time shape inference)
+        const auto& node_outputs = node->output_tensors();
 
-                if (required > available) {
-                    MI_LOG_ERROR("[InferencePlan] Tensor '" + node->name() + "' output[0] " +
-                                 "shape " + inferred->to_string() +
-                                 " exceeds planned capacity " + std::to_string(available) +
-                                 " bytes");
-                    return core::Status::ERROR_RUNTIME;
-                }
+        // Process each output
+        for (size_t i = 0; i < inferred_shapes->size(); ++i) {
+            const auto& inferred = (*inferred_shapes)[i];
 
-                outputs[0]->set_shape_metadata(*inferred);
-            } else {
-                outputs[0]->resize(*inferred);
+            // Determine dtype
+            core::DataType dtype = core::DataType::FLOAT32;
+            if (i < node_outputs.size() && node_outputs[i]) {
+                dtype = node_outputs[i]->dtype();
             }
 
-            resized++;
+            // Allocate if nullptr
+            if (!outputs[i]) {
+                outputs[i] = std::make_shared<core::Tensor>(inferred, dtype, config_.device_type);
+                allocated++;
+                continue;
+            }
 
-            if (config_.enable_profiling) {
-                MI_LOG_INFO("[InferencePlan]   Resized '" + node->name() +
-                            "': " + inferred->to_string());
+            // Resize if shape changed
+            if (outputs[i]->shape() != inferred) {
+                if (config_.enable_memory_planning) {
+                    const size_t required =
+                        static_cast<size_t>(inferred.numel()) * outputs[i]->element_size();
+                    size_t available = outputs[i]->capacity();
+                    if (outputs[i]->storage_offset() >= available) {
+                        available = 0;
+                    } else {
+                        available -= outputs[i]->storage_offset();
+                    }
+
+                    if (required > available) {
+                        MI_LOG_ERROR("[InferencePlan] Tensor '" + node->name() + "' output[" +
+                                     std::to_string(i) + "] shape " + inferred.to_string() +
+                                     " exceeds planned capacity " + std::to_string(available) +
+                                     " bytes");
+                        return core::Status::ERROR_RUNTIME;
+                    }
+
+                    outputs[i]->set_shape_metadata(inferred);
+                } else {
+                    outputs[i]->resize(inferred);
+                }
+
+                resized++;
+
+                if (config_.enable_profiling) {
+                    MI_LOG_INFO("[InferencePlan]   Resized '" + node->name() +
+                                "' output[" + std::to_string(i) + "]: " + inferred.to_string());
+                }
             }
         }
     }
 
-    if (resized > 0) {
-        MI_LOG_INFO("[InferencePlan] Resized " + std::to_string(resized) +
-                    " tensor(s) due to shape change");
+    if (resized > 0 || allocated > 0) {
+        MI_LOG_INFO("[InferencePlan] Shape change: " + std::to_string(allocated) +
+                    " allocated, " + std::to_string(resized) + " resized");
     }
 
     return core::Status::SUCCESS;

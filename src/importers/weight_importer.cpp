@@ -26,11 +26,20 @@ std::shared_ptr<core::Tensor> WeightImporter::import_tensor(
     }
     
     // 3. Create tensor
+    // Handle scalar case: empty dims means scalar with 1 element
+    if (dims.empty()) {
+        dims.push_back(1);
+        shape = core::Shape(dims);
+    }
     auto tensor = std::make_shared<core::Tensor>(shape, dtype);
-    
+
     // 4. Import data
     void* data = tensor->data();
     size_t num_elements = tensor->shape().numel();
+    // Ensure at least 1 element for scalars
+    if (num_elements == 0) {
+        num_elements = 1;
+    }
     
     if (tensor_proto.has_raw_data()) {
         // Raw binary data (most efficient)

@@ -218,23 +218,20 @@ core::Status GemmImporter::import_operator(ImporterContext& ctx, const onnx::Nod
 
 core::Status MatMulImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     ctx.log_info("MatMul operator");
-    
+
     // Validate inputs
     if (node.input_size() != 2) {
         ctx.set_error("MatMul requires exactly 2 inputs");
         return core::Status::ERROR_INVALID_ARGUMENT;
     }
-    
-    // MatMul: Y = A @ B, can be implemented using Linear without bias
-    auto param = std::make_shared<operators::LinearParam>();
-    param->use_bias = false;
-    auto op = std::make_shared<operators::GenericOperator>("MatMul", core::OpType::kLINEAR);
-    op->set_plugin_param(param);
-    
+
+    // Use kMATMUL (not kLINEAR) for proper batched matmul support
+    auto op = std::make_shared<operators::GenericOperator>("MatMul", core::OpType::kMATMUL);
+
     const std::string& node_name = node.output(0);
     auto graph_node = ctx.get_graph()->create_node(node_name);
     graph_node->set_operator(op);
-    
+
     // Set input tensors
     std::vector<std::shared_ptr<core::Tensor>> input_tensors;
     for (int i = 0; i < node.input_size(); ++i) {
@@ -250,13 +247,13 @@ core::Status MatMulImporter::import_operator(ImporterContext& ctx, const onnx::N
         input_tensors.push_back(tensor);
     }
     graph_node->set_input_tensors(input_tensors);
-    
+
     // Connect graph edges for non-weight inputs
     connect_input_ports(ctx, node, node_name);
-    
+
     // Register output tensors
     register_node_outputs(ctx, *graph_node, node, node_name);
-    
+
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
@@ -296,6 +293,45 @@ core::Status ReluImporter::import_operator(ImporterContext& ctx, const onnx::Nod
     // Register output tensor
     register_node_outputs(ctx, *graph_node, node, node_name);
     
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Gelu Operator Importer
+// =============================================================================
+
+core::Status GeluImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Gelu operator");
+
+    // Validate inputs
+    if (node.input_size() != 1) {
+        ctx.set_error("Gelu requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    // Create Gelu operator
+    auto op = std::make_shared<operators::GenericOperator>("Gelu", core::OpType::kGELU);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensor
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    // Connect graph edge
+    connect_input_ports(ctx, node, node_name);
+
+    // Register output tensor
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
     ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
@@ -476,10 +512,38 @@ core::Status BatchNormalizationImporter::import_operator(ImporterContext& ctx, c
 
 core::Status AddImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     ctx.log_info("Add operator");
-    
-    // TODO: Create Add operator and add to graph
-    ctx.log_warning("Add operator import not fully implemented yet");
-    
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Add requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Add", core::OpType::kADD);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) {
+            tensor = ctx.get_weight(input_name);
+        }
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
 
@@ -489,10 +553,120 @@ core::Status AddImporter::import_operator(ImporterContext& ctx, const onnx::Node
 
 core::Status MulImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     ctx.log_info("Mul operator");
-    
-    // TODO: Create Mul operator and add to graph
-    ctx.log_warning("Mul operator import not fully implemented yet");
-    
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Mul requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Mul", core::OpType::kMUL);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) {
+            tensor = ctx.get_weight(input_name);
+        }
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Sub Operator Importer
+// =============================================================================
+
+core::Status SubImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Sub operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Sub requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Sub", core::OpType::kSUB);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) {
+            tensor = ctx.get_weight(input_name);
+        }
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Div Operator Importer
+// =============================================================================
+
+core::Status DivImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Div operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Div requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Div", core::OpType::kDIV);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) {
+            tensor = ctx.get_weight(input_name);
+        }
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
 
@@ -641,14 +815,46 @@ core::Status FlattenImporter::import_operator(ImporterContext& ctx, const onnx::
 
 core::Status ConcatImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     AttributeHelper attrs(node);
-    
+
     int64_t axis = attrs.get_int("axis");
-    
+
     ctx.log_info("Concat operator - axis: " + std::to_string(axis));
-    
-    // TODO: Create Concat operator and add to graph
-    ctx.log_warning("Concat operator import not fully implemented yet");
-    
+
+    if (node.input_size() < 1) {
+        ctx.set_error("Concat requires at least 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::ConcatParam>();
+    param->axis = axis;
+
+    auto op = std::make_shared<operators::GenericOperator>("Concat", core::OpType::kCONCAT);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensors
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) {
+            tensor = ctx.get_weight(input_name);
+        }
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
 
@@ -658,14 +864,831 @@ core::Status ConcatImporter::import_operator(ImporterContext& ctx, const onnx::N
 
 core::Status SoftmaxImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
     AttributeHelper attrs(node);
-    
+
     int64_t axis = attrs.get_int("axis", -1);
-    
+
     ctx.log_info("Softmax operator - axis: " + std::to_string(axis));
-    
-    // TODO: Create Softmax operator and add to graph
-    ctx.log_warning("Softmax operator import not fully implemented yet");
-    
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Softmax requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::SoftmaxParam>();
+    param->axis = static_cast<int>(axis);
+
+    auto op = std::make_shared<operators::GenericOperator>("Softmax", core::OpType::kSOFTMAX);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Transpose Operator Importer
+// =============================================================================
+
+core::Status TransposeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Transpose operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Transpose requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::TransposeParam>();
+    param->perm = attrs.get_ints("perm");
+
+    auto op = std::make_shared<operators::GenericOperator>("Transpose", core::OpType::kTRANSPOSE);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) {
+        input_tensor = ctx.get_weight(input_name);
+    }
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Squeeze Operator Importer
+// =============================================================================
+
+core::Status SqueezeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Squeeze operator");
+
+    auto param = std::make_shared<operators::SqueezeParam>();
+    // In opset < 13, axes come from attribute
+    param->axes = attrs.get_ints("axes");
+
+    // In opset >= 13, axes come from second input tensor
+    if (node.input_size() >= 2 && !node.input(1).empty()) {
+        const std::string& axes_input_name = node.input(1);
+        auto axes_tensor = ctx.get_weight(axes_input_name);
+
+        if (axes_tensor) {
+            // Extract axes from constant tensor
+            param->axes.clear();
+            const int64_t axes_size = axes_tensor->shape().numel();
+
+            if (axes_tensor->dtype() == core::DataType::INT64) {
+                const int64_t* axes_data = static_cast<const int64_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(axes_data[i]);
+                }
+            } else if (axes_tensor->dtype() == core::DataType::INT32) {
+                const int32_t* axes_data = static_cast<const int32_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(static_cast<int64_t>(axes_data[i]));
+                }
+            }
+        }
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Squeeze", core::OpType::kSQUEEZE);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Only pass the first input (data) to the plugin
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    const std::string& data_input_name = node.input(0);
+    auto data_tensor = ctx.get_tensor(data_input_name);
+    if (!data_tensor) {
+        data_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(data_input_name, data_tensor);
+    }
+    input_tensors.push_back(data_tensor);
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Unsqueeze Operator Importer
+// =============================================================================
+
+core::Status UnsqueezeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Unsqueeze operator");
+
+    auto param = std::make_shared<operators::SqueezeParam>();
+    // In opset < 13, axes come from attribute
+    param->axes = attrs.get_ints("axes");
+
+    // In opset >= 13, axes come from second input tensor (required)
+    if (node.input_size() >= 2 && !node.input(1).empty()) {
+        const std::string& axes_input_name = node.input(1);
+        auto axes_tensor = ctx.get_weight(axes_input_name);
+
+        if (axes_tensor) {
+            // Extract axes from constant tensor
+            param->axes.clear();
+            const int64_t axes_size = axes_tensor->shape().numel();
+
+            if (axes_tensor->dtype() == core::DataType::INT64) {
+                const int64_t* axes_data = static_cast<const int64_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(axes_data[i]);
+                }
+            } else if (axes_tensor->dtype() == core::DataType::INT32) {
+                const int32_t* axes_data = static_cast<const int32_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(static_cast<int64_t>(axes_data[i]));
+                }
+            }
+        }
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Unsqueeze", core::OpType::kUNSQUEEZE);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Only pass the first input (data) to the plugin
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    const std::string& data_input_name = node.input(0);
+    auto data_tensor = ctx.get_tensor(data_input_name);
+    if (!data_tensor) {
+        data_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(data_input_name, data_tensor);
+    }
+    input_tensors.push_back(data_tensor);
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Slice Operator Importer
+// =============================================================================
+
+core::Status SliceImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Slice operator");
+
+    auto param = std::make_shared<operators::SliceParam>();
+    // Try to get from attributes (older opset)
+    param->starts = attrs.get_ints("starts");
+    param->ends = attrs.get_ints("ends");
+    param->axes = attrs.get_ints("axes");
+
+    auto op = std::make_shared<operators::GenericOperator>("Slice", core::OpType::kSLICE);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Gather Operator Importer
+// =============================================================================
+
+core::Status GatherImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Gather operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Gather requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::GatherParam>();
+    param->axis = attrs.get_int("axis", 0);
+
+    auto op = std::make_shared<operators::GenericOperator>("Gather", core::OpType::kGATHER);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Shape Operator Importer
+// =============================================================================
+
+core::Status ShapeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Shape operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Shape requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Shape", core::OpType::kSHAPE);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Cast Operator Importer
+// =============================================================================
+
+core::Status CastImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("Cast operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Cast requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::CastParam>();
+    int64_t to = attrs.get_int("to", 1);  // ONNX TensorProto.DataType
+    // Map ONNX dtype to mini_infer dtype
+    switch (to) {
+        case 1: param->to_dtype = core::DataType::FLOAT32; break;
+        case 6: param->to_dtype = core::DataType::INT32; break;
+        case 7: param->to_dtype = core::DataType::INT64; break;
+        default: param->to_dtype = core::DataType::FLOAT32; break;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Cast", core::OpType::kCAST);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// ReduceMean Operator Importer
+// =============================================================================
+
+core::Status ReduceMeanImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("ReduceMean operator");
+
+    auto param = std::make_shared<operators::ReduceMeanParam>();
+    // In opset < 13, axes come from attribute
+    param->axes = attrs.get_ints("axes");
+    param->keepdims = (attrs.get_int("keepdims", 1) != 0);
+
+    // In opset >= 13, axes come from optional second input tensor
+    if (node.input_size() >= 2 && !node.input(1).empty()) {
+        const std::string& axes_input_name = node.input(1);
+        auto axes_tensor = ctx.get_weight(axes_input_name);
+
+        if (axes_tensor) {
+            // Extract axes from constant tensor
+            param->axes.clear();
+            const int64_t axes_size = axes_tensor->shape().numel();
+
+            if (axes_tensor->dtype() == core::DataType::INT64) {
+                const int64_t* axes_data = static_cast<const int64_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(axes_data[i]);
+                }
+            } else if (axes_tensor->dtype() == core::DataType::INT32) {
+                const int32_t* axes_data = static_cast<const int32_t*>(axes_tensor->data());
+                for (int64_t i = 0; i < axes_size; ++i) {
+                    param->axes.push_back(static_cast<int64_t>(axes_data[i]));
+                }
+            }
+        }
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("ReduceMean", core::OpType::kREDUCE_MEAN);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Only pass the first input (data) to the plugin
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    const std::string& data_input_name = node.input(0);
+    auto data_tensor = ctx.get_tensor(data_input_name);
+    if (!data_tensor) {
+        data_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(data_input_name, data_tensor);
+    }
+    input_tensors.push_back(data_tensor);
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// LayerNormalization Operator Importer
+// =============================================================================
+
+core::Status LayerNormalizationImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("LayerNormalization operator");
+
+    if (node.input_size() < 2) {
+        ctx.set_error("LayerNormalization requires at least 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::LayerNormParam>();
+    param->axis = attrs.get_int("axis", -1);
+    param->epsilon = attrs.get_float("epsilon", 1e-5f);
+
+    auto op = std::make_shared<operators::GenericOperator>("LayerNormalization", core::OpType::kLAYER_NORM);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Pow Operator Importer
+// =============================================================================
+
+core::Status PowImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Pow operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Pow requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Pow", core::OpType::kPOW);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Sqrt Operator Importer
+// =============================================================================
+
+core::Status SqrtImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Sqrt operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Sqrt requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Sqrt", core::OpType::kSQRT);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Erf Operator Importer
+// =============================================================================
+
+core::Status ErfImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Erf operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Erf requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Erf", core::OpType::kERF);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Tanh Operator Importer
+// =============================================================================
+
+core::Status TanhImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Tanh operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Tanh requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Tanh", core::OpType::kTANH);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Neg Operator Importer
+// =============================================================================
+
+core::Status NegImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Neg operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Neg requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Neg", core::OpType::kNEG);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Exp Operator Importer
+// =============================================================================
+
+core::Status ExpImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Exp operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("Exp requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Exp", core::OpType::kEXP);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    const std::string& input_name = node.input(0);
+    auto input_tensor = ctx.get_tensor(input_name);
+    if (!input_tensor) input_tensor = ctx.get_weight(input_name);
+    if (!input_tensor) {
+        input_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(input_name, input_tensor);
+    }
+    graph_node->set_input_tensors({input_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Equal Operator Importer
+// =============================================================================
+
+core::Status EqualImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Equal operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Equal requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Equal", core::OpType::kEQUAL);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Where Operator Importer
+// =============================================================================
+
+core::Status WhereImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Where operator");
+
+    if (node.input_size() != 3) {
+        ctx.set_error("Where requires exactly 3 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Where", core::OpType::kWHERE);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
+// Expand Operator Importer
+// =============================================================================
+
+core::Status ExpandImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    ctx.log_info("Expand operator");
+
+    if (node.input_size() != 2) {
+        ctx.set_error("Expand requires exactly 2 inputs");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::ExpandParam>();
+
+    // Try to parse constant target shape from initializer
+    const std::string& shape_input_name = node.input(1);
+    if (auto shape_weight = ctx.get_weight(shape_input_name)) {
+        if (shape_weight->dtype() != core::DataType::INT64 &&
+            shape_weight->dtype() != core::DataType::INT32) {
+            ctx.set_error("Expand shape tensor must be INT64 or INT32");
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        size_t shape_size = static_cast<size_t>(shape_weight->shape().numel());
+        if (shape_size == 0) {
+            ctx.set_error("Expand shape tensor is empty");
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        const void* raw_data = shape_weight->data();
+        if (!raw_data) {
+            ctx.set_error("Expand shape tensor has no data");
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        param->shape.resize(shape_size);
+        if (shape_weight->dtype() == core::DataType::INT64) {
+            const int64_t* data = static_cast<const int64_t*>(raw_data);
+            for (size_t i = 0; i < shape_size; ++i) {
+                param->shape[i] = data[i];
+            }
+        } else {
+            const int32_t* data = static_cast<const int32_t*>(raw_data);
+            for (size_t i = 0; i < shape_size; ++i) {
+                param->shape[i] = static_cast<int64_t>(data[i]);
+            }
+        }
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("Expand", core::OpType::kEXPAND);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    for (int i = 0; i < node.input_size(); ++i) {
+        const std::string& input_name = node.input(i);
+        auto tensor = ctx.get_tensor(input_name);
+        if (!tensor) tensor = ctx.get_weight(input_name);
+        if (!tensor) {
+            tensor = std::make_shared<core::Tensor>();
+            ctx.register_tensor(input_name, tensor);
+        }
+        input_tensors.push_back(tensor);
+    }
+    graph_node->set_input_tensors(input_tensors);
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
     return core::Status::SUCCESS;
 }
 
@@ -712,42 +1735,145 @@ core::Status ConstantImporter::import_operator(ImporterContext& ctx, const onnx:
 }
 
 // =============================================================================
+// ConstantOfShape Operator Importer
+// =============================================================================
+
+core::Status ConstantOfShapeImporter::import_operator(ImporterContext& ctx, const onnx::NodeProto& node) {
+    AttributeHelper attrs(node);
+    ctx.log_info("ConstantOfShape operator");
+
+    if (node.input_size() != 1) {
+        ctx.set_error("ConstantOfShape requires exactly 1 input");
+        return core::Status::ERROR_INVALID_ARGUMENT;
+    }
+
+    auto param = std::make_shared<operators::ConstantOfShapeParam>();
+
+    // Parse the "value" attribute (optional, default is 0.0f)
+    // The value attribute is a tensor with a single element
+    for (const auto& attr : node.attribute()) {
+        if (attr.name() == "value" && attr.has_t()) {
+            const auto& tensor_proto = attr.t();
+
+            // Extract the scalar value from the tensor
+            if (tensor_proto.float_data_size() > 0) {
+                param->value = tensor_proto.float_data(0);
+                param->dtype = core::DataType::FLOAT32;
+            } else if (tensor_proto.int32_data_size() > 0) {
+                param->value = static_cast<float>(tensor_proto.int32_data(0));
+                param->dtype = core::DataType::INT32;
+            } else if (tensor_proto.int64_data_size() > 0) {
+                param->value = static_cast<float>(tensor_proto.int64_data(0));
+                param->dtype = core::DataType::INT64;
+            } else if (tensor_proto.has_raw_data() && !tensor_proto.raw_data().empty()) {
+                // Handle raw data
+                const std::string& raw = tensor_proto.raw_data();
+                if (tensor_proto.data_type() == 1) {  // FLOAT
+                    param->value = *reinterpret_cast<const float*>(raw.data());
+                    param->dtype = core::DataType::FLOAT32;
+                } else if (tensor_proto.data_type() == 6) {  // INT32
+                    param->value = static_cast<float>(*reinterpret_cast<const int32_t*>(raw.data()));
+                    param->dtype = core::DataType::INT32;
+                } else if (tensor_proto.data_type() == 7) {  // INT64
+                    param->value = static_cast<float>(*reinterpret_cast<const int64_t*>(raw.data()));
+                    param->dtype = core::DataType::INT64;
+                }
+            }
+            break;
+        }
+    }
+
+    auto op = std::make_shared<operators::GenericOperator>("ConstantOfShape", core::OpType::kCONSTANT_OF_SHAPE);
+    op->set_plugin_param(param);
+
+    const std::string& node_name = node.output(0);
+    auto graph_node = ctx.get_graph()->create_node(node_name);
+    graph_node->set_operator(op);
+
+    // Set input tensor (shape)
+    const std::string& shape_input_name = node.input(0);
+    auto shape_tensor = ctx.get_tensor(shape_input_name);
+    if (!shape_tensor) {
+        shape_tensor = ctx.get_weight(shape_input_name);
+    }
+    if (!shape_tensor) {
+        shape_tensor = std::make_shared<core::Tensor>();
+        ctx.register_tensor(shape_input_name, shape_tensor);
+    }
+    graph_node->set_input_tensors({shape_tensor});
+
+    connect_input_ports(ctx, node, node_name);
+    register_node_outputs(ctx, *graph_node, node, node_name);
+
+    ctx.add_node(graph_node);
+    return core::Status::SUCCESS;
+}
+
+// =============================================================================
 // Register All Builtin Operators
 // =============================================================================
 
 void register_builtin_operators(OperatorRegistry& registry) {
     // Convolution operators
     REGISTER_ONNX_OPERATOR("Conv", ConvImporter);
-    
+
     // Linear algebra operators
     REGISTER_ONNX_OPERATOR("Gemm", GemmImporter);
     REGISTER_ONNX_OPERATOR("MatMul", MatMulImporter);
-    
+
     // Activation operators
     REGISTER_ONNX_OPERATOR("Relu", ReluImporter);
-    
+    REGISTER_ONNX_OPERATOR("Tanh", TanhImporter);
+    REGISTER_ONNX_OPERATOR("Gelu", GeluImporter);
+
     // Pooling operators
     REGISTER_ONNX_OPERATOR("MaxPool", MaxPoolImporter);
     REGISTER_ONNX_OPERATOR("AveragePool", AveragePoolImporter);
     REGISTER_ONNX_OPERATOR("GlobalAveragePool", GlobalAveragePoolImporter);
-    
+
     // Normalization operators
     REGISTER_ONNX_OPERATOR("BatchNormalization", BatchNormalizationImporter);
-    
+    REGISTER_ONNX_OPERATOR("LayerNormalization", LayerNormalizationImporter);
+
     // Element-wise operators
     REGISTER_ONNX_OPERATOR("Add", AddImporter);
+    REGISTER_ONNX_OPERATOR("Sub", SubImporter);
     REGISTER_ONNX_OPERATOR("Mul", MulImporter);
-    
+    REGISTER_ONNX_OPERATOR("Div", DivImporter);
+    REGISTER_ONNX_OPERATOR("Pow", PowImporter);
+    REGISTER_ONNX_OPERATOR("Sqrt", SqrtImporter);
+    REGISTER_ONNX_OPERATOR("Exp", ExpImporter);
+    REGISTER_ONNX_OPERATOR("Neg", NegImporter);
+    REGISTER_ONNX_OPERATOR("Erf", ErfImporter);
+
     // Shape operators
     REGISTER_ONNX_OPERATOR("Reshape", ReshapeImporter);
     REGISTER_ONNX_OPERATOR("Flatten", FlattenImporter);
     REGISTER_ONNX_OPERATOR("Concat", ConcatImporter);
-    
+    REGISTER_ONNX_OPERATOR("Transpose", TransposeImporter);
+    REGISTER_ONNX_OPERATOR("Squeeze", SqueezeImporter);
+    REGISTER_ONNX_OPERATOR("Unsqueeze", UnsqueezeImporter);
+    REGISTER_ONNX_OPERATOR("Slice", SliceImporter);
+    REGISTER_ONNX_OPERATOR("Gather", GatherImporter);
+    REGISTER_ONNX_OPERATOR("Shape", ShapeImporter);
+    REGISTER_ONNX_OPERATOR("Expand", ExpandImporter);
+
+    // Reduction operators
+    REGISTER_ONNX_OPERATOR("ReduceMean", ReduceMeanImporter);
+
+    // Comparison operators
+    REGISTER_ONNX_OPERATOR("Equal", EqualImporter);
+    REGISTER_ONNX_OPERATOR("Where", WhereImporter);
+
+    // Type conversion
+    REGISTER_ONNX_OPERATOR("Cast", CastImporter);
+
     // Other operators
     REGISTER_ONNX_OPERATOR("Softmax", SoftmaxImporter);
     REGISTER_ONNX_OPERATOR("Constant", ConstantImporter);
-    
-    MI_LOG_INFO("[BuiltinOperators] Registered 15 builtin ONNX operators");
+    REGISTER_ONNX_OPERATOR("ConstantOfShape", ConstantOfShapeImporter);
+
+    MI_LOG_INFO("[BuiltinOperators] Registered builtin ONNX operators");
 }
 
 } // namespace importers

@@ -59,13 +59,37 @@ echo ""
 
 echo "Step 2: Running C++ Mini-Infer Inference"
 echo "----------------------------------------------------------------------"
-../../../build/examples/lenet5_inference \
+
+# Find executable
+EXECUTABLE=""
+for candidate in \
+    "../../../build/Debug/bin/lenet5_inference" \
+    "../../../build/Release/bin/lenet5_inference" \
+    "../../../build/bin/lenet5_inference"
+do
+    if [ -x "$candidate" ]; then
+        EXECUTABLE="$candidate"
+        break
+    fi
+done
+
+if [ -z "$EXECUTABLE" ]; then
+    echo ""
+    echo "Error: lenet5_inference executable not found."
+    echo "Please build the project first:"
+    echo "  cmake --build build/Debug --parallel"
+    echo ""
+    exit 1
+fi
+
+echo "Using executable: $EXECUTABLE"
+"$EXECUTABLE" \
     weights \
     test_samples/binary \
     --save-outputs test_samples/minfer_outputs.json || {
     echo ""
     echo "Note: Make sure lenet5_inference is compiled:"
-    echo "  cmake --build build --config Release --target lenet5_inference"
+    echo "  cmake --build build/Debug --parallel"
     echo ""
     exit 1
 }

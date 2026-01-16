@@ -43,6 +43,7 @@ enum class OpType {
     kLEAKY_RELU,  ///< Leaky ReLU (ONNX: "LeakyRelu")
     kPRELU,       ///< Parametric ReLU (ONNX: "PRelu")
     kELU,         ///< Exponential Linear Unit (ONNX: "Elu")
+    kGELU,        ///< Gaussian Error Linear Unit (ONNX: "Gelu")
 
     // ========================================================================
     // Pooling Operations
@@ -106,6 +107,22 @@ enum class OpType {
     kCAST,     ///< Type casting (ONNX: "Cast")
     kPADDING,  ///< Padding operation (ONNX: "Pad")
     kSLICE,    ///< Slice operation (ONNX: "Slice")
+    kCONSTANT_OF_SHAPE,  ///< Generate constant tensor of given shape (ONNX: "ConstantOfShape")
+
+    // ========================================================================
+    // BERT-specific Operations
+    // ========================================================================
+    kGATHER,  ///< Gather operation (ONNX: "Gather")
+    kSHAPE,   ///< Shape operation (ONNX: "Shape")
+    kPOW,     ///< Power operation (ONNX: "Pow")
+    kSQRT,    ///< Square root (ONNX: "Sqrt")
+    kERF,     ///< Error function (ONNX: "Erf")
+    kTANH_OP, ///< Tanh as standalone op (ONNX: "Tanh" - distinct from activation)
+    kNEG,     ///< Negation (ONNX: "Neg")
+    kEXP,     ///< Exponential (ONNX: "Exp")
+    kEQUAL,   ///< Equal comparison (ONNX: "Equal")
+    kWHERE,   ///< Where/Select (ONNX: "Where")
+    kEXPAND,  ///< Expand/Broadcast (ONNX: "Expand")
 
     // ========================================================================
     // Custom/Unknown
@@ -133,6 +150,7 @@ constexpr const char* kTanh = "Tanh";
 constexpr const char* kLeakyRelu = "LeakyRelu";
 constexpr const char* kPRelu = "PRelu";
 constexpr const char* kElu = "Elu";
+constexpr const char* kGelu = "Gelu";
 
 // Pooling
 constexpr const char* kMaxPool = "MaxPool";
@@ -177,6 +195,19 @@ constexpr const char* kSoftmax = "Softmax";
 constexpr const char* kCast = "Cast";
 constexpr const char* kPad = "Pad";
 constexpr const char* kSlice = "Slice";
+constexpr const char* kConstantOfShape = "ConstantOfShape";
+
+// BERT-specific
+constexpr const char* kGather = "Gather";
+constexpr const char* kShape = "Shape";
+constexpr const char* kPow = "Pow";
+constexpr const char* kSqrt = "Sqrt";
+constexpr const char* kErf = "Erf";
+constexpr const char* kNeg = "Neg";
+constexpr const char* kExp = "Exp";
+constexpr const char* kEqual = "Equal";
+constexpr const char* kWhere = "Where";
+constexpr const char* kExpand = "Expand";
 
 }  // namespace op_names
 

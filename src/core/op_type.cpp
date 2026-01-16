@@ -27,6 +27,7 @@ const std::unordered_map<std::string, OpType> kStringToOpTypeMap = {
     {op_names::kLeakyRelu, OpType::kLEAKY_RELU},
     {op_names::kPRelu, OpType::kPRELU},
     {op_names::kElu, OpType::kELU},
+    {op_names::kGelu, OpType::kGELU},
 
     // Pooling
     {op_names::kMaxPool, OpType::kMAX_POOL},
@@ -71,6 +72,19 @@ const std::unordered_map<std::string, OpType> kStringToOpTypeMap = {
     {op_names::kCast, OpType::kCAST},
     {op_names::kPad, OpType::kPADDING},
     {op_names::kSlice, OpType::kSLICE},
+    {op_names::kConstantOfShape, OpType::kCONSTANT_OF_SHAPE},
+
+    // BERT-specific
+    {op_names::kGather, OpType::kGATHER},
+    {op_names::kShape, OpType::kSHAPE},
+    {op_names::kPow, OpType::kPOW},
+    {op_names::kSqrt, OpType::kSQRT},
+    {op_names::kErf, OpType::kERF},
+    {op_names::kNeg, OpType::kNEG},
+    {op_names::kExp, OpType::kEXP},
+    {op_names::kEqual, OpType::kEQUAL},
+    {op_names::kWhere, OpType::kWHERE},
+    {op_names::kExpand, OpType::kEXPAND},
 };
 
 // Static mapping table: OpType -> String
@@ -87,6 +101,7 @@ const std::unordered_map<OpType, const char*> kOpTypeToStringMap = {
     {OpType::kLEAKY_RELU, op_names::kLeakyRelu},
     {OpType::kPRELU, op_names::kPRelu},
     {OpType::kELU, op_names::kElu},
+    {OpType::kGELU, op_names::kGelu},
 
     // Pooling
     {OpType::kMAX_POOL, op_names::kMaxPool},
@@ -131,6 +146,19 @@ const std::unordered_map<OpType, const char*> kOpTypeToStringMap = {
     {OpType::kCAST, op_names::kCast},
     {OpType::kPADDING, op_names::kPad},
     {OpType::kSLICE, op_names::kSlice},
+    {OpType::kCONSTANT_OF_SHAPE, op_names::kConstantOfShape},
+
+    // BERT-specific
+    {OpType::kGATHER, op_names::kGather},
+    {OpType::kSHAPE, op_names::kShape},
+    {OpType::kPOW, op_names::kPow},
+    {OpType::kSQRT, op_names::kSqrt},
+    {OpType::kERF, op_names::kErf},
+    {OpType::kNEG, op_names::kNeg},
+    {OpType::kEXP, op_names::kExp},
+    {OpType::kEQUAL, op_names::kEqual},
+    {OpType::kWHERE, op_names::kWhere},
+    {OpType::kEXPAND, op_names::kExpand},
 
     // Special cases
     {OpType::kCUSTOM, "Custom"},

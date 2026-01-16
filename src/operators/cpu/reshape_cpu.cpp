@@ -60,6 +60,67 @@ public:
         return core::Status::SUCCESS;
     }
 
+    core::Status infer_output_shapes_with_tensors(
+        const std::vector<core::Shape>& input_shapes,
+        const std::vector<core::DataType>& input_dtypes,
+        const std::vector<std::shared_ptr<core::Tensor>>& input_tensors,
+        std::vector<core::Shape>& output_shapes,
+        std::vector<core::DataType>& output_dtypes) const override {
+        (void)input_dtypes;
+
+        if (input_shapes.empty()) {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        const auto& input_shape = input_shapes[0];
+        int64_t total_elements = input_shape.numel();
+
+        std::vector<int64_t> target_shape;
+
+        // Try to get shape from second input tensor (dynamic shape)
+        if (input_tensors.size() >= 2 && input_tensors[1] && input_tensors[1]->data()) {
+            const auto& shape_tensor = input_tensors[1];
+            size_t num_dims = static_cast<size_t>(shape_tensor->shape().numel());
+
+            // Read shape values based on dtype
+            if (shape_tensor->dtype() == core::DataType::INT64) {
+                const int64_t* shape_data = static_cast<const int64_t*>(shape_tensor->data());
+                target_shape.assign(shape_data, shape_data + num_dims);
+            } else if (shape_tensor->dtype() == core::DataType::INT32) {
+                const int32_t* shape_data = static_cast<const int32_t*>(shape_tensor->data());
+                for (size_t i = 0; i < num_dims; ++i) {
+                    target_shape.push_back(static_cast<int64_t>(shape_data[i]));
+                }
+            } else {
+                return core::Status::ERROR_INVALID_ARGUMENT;
+            }
+        } else if (param_ && !param_->shape.empty()) {
+            // Fall back to static shape from param
+            target_shape = param_->shape;
+        } else {
+            return core::Status::ERROR_INVALID_ARGUMENT;
+        }
+
+        std::vector<int64_t> resolved_shape;
+        auto status = resolve_shape(target_shape, total_elements, resolved_shape);
+        if (status != core::Status::SUCCESS) {
+            return status;
+        }
+
+        output_shapes.clear();
+        output_shapes.push_back(core::Shape(resolved_shape));
+
+        // Output dtype is same as input dtype
+        output_dtypes.clear();
+        if (!input_dtypes.empty()) {
+            output_dtypes.push_back(input_dtypes[0]);
+        } else {
+            output_dtypes.push_back(core::DataType::FLOAT32);
+        }
+
+        return core::Status::SUCCESS;
+    }
+
     core::Status enqueue(
         const std::vector<std::shared_ptr<core::Tensor>>& inputs,
         std::vector<std::shared_ptr<core::Tensor>>& outputs,

@@ -16,6 +16,7 @@ set(TEST_SOURCES
     test_flatten.cpp
     test_reshape.cpp
     test_kernel_registry.cpp
+    test_constant_folding.cpp
 )
 
 # Add CUDA tests if CUDA is enabled
@@ -34,7 +35,10 @@ foreach(test_src ${TEST_SOURCES})
         PRIVATE
             mini_infer_core
             mini_infer_backends
+            # Use whole-archive for operators to ensure static plugin registration
+            $<$<NOT:$<PLATFORM_ID:Windows>>:-Wl,--whole-archive>
             mini_infer_operators
+            $<$<NOT:$<PLATFORM_ID:Windows>>:-Wl,--no-whole-archive>
             mini_infer_graph_all
             mini_infer_runtime
             mini_infer_kernels_all

@@ -76,13 +76,37 @@ echo ""
 
 echo "Step 3: Running C++ Mini-Infer ONNX Inference"
 echo "----------------------------------------------------------------------"
-../../../build/examples/lenet5_onnx_test \
+
+# Find executable
+EXECUTABLE=""
+for candidate in \
+    "../../../build/Debug/bin/lenet5_onnx_test" \
+    "../../../build/Release/bin/lenet5_onnx_test" \
+    "../../../build/bin/lenet5_onnx_test"
+do
+    if [ -x "$candidate" ]; then
+        EXECUTABLE="$candidate"
+        break
+    fi
+done
+
+if [ -z "$EXECUTABLE" ]; then
+    echo ""
+    echo "Error: lenet5_onnx_test executable not found."
+    echo "Please build the project first:"
+    echo "  cmake --build build/Debug --parallel"
+    echo ""
+    exit 1
+fi
+
+echo "Using executable: $EXECUTABLE"
+"$EXECUTABLE" \
     models/lenet5.onnx \
     test_samples/binary \
     --save-outputs test_samples/minfer_onnx_outputs.json || {
     echo ""
     echo "Note: Make sure lenet5_onnx_test is compiled:"
-    echo "  cmake --build build --config Release --target lenet5_onnx_test"
+    echo "  cmake --build build/Debug --parallel"
     echo ""
     exit 1
 }

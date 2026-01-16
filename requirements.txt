@@ -7,12 +7,13 @@
 # -----------------------
 torch>=2.0.0,<3.0.0          # PyTorch for model training and export
 torchvision>=0.15.0          # Computer vision datasets and transforms
+transformers>=4.30.0         # Hugging Face Transformers for BERT models
 
 # ONNX Support
 # ------------
 onnx>=1.14.0                 # ONNX model format
 onnxruntime>=1.15.0          # ONNX Runtime for model verification
-onnx-simplifier>=0.4.33      # Simplify ONNX models (optional)
+# onnxsim>=0.4.33            # Simplify ONNX models (optional, commented out for Python 3.13 compatibility)
 
 # Scientific Computing
 # --------------------

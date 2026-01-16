@@ -277,5 +277,27 @@ core::Status Graph::validate() const {
     return checked_topological_sort(topo);
 }
 
+// ============================================================================
+// Constant Management Implementation
+// ============================================================================
+
+void Graph::set_constant(size_t node_id, std::shared_ptr<core::Tensor> tensor) {
+    if (tensor && node_id < nodes_.size()) {
+        constants_[node_id] = tensor;
+    }
+}
+
+std::shared_ptr<core::Tensor> Graph::get_constant(size_t node_id) const {
+    auto it = constants_.find(node_id);
+    if (it != constants_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+bool Graph::is_constant(size_t node_id) const {
+    return constants_.find(node_id) != constants_.end();
+}
+
 }  // namespace graph
 }  // namespace mini_infer

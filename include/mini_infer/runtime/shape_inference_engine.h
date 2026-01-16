@@ -54,6 +54,14 @@ class ShapeInferenceEngine {
     const core::Shape* get_inferred_shape(const std::string& tensor_name) const;
 
     /**
+     * @brief Get all inferred output shapes for a node by ID
+     *
+     * @param node_id Node ID
+     * @return Pointer to vector of shapes, or nullptr if not found
+     */
+    const std::vector<core::Shape>* get_inferred_shapes(size_t node_id) const;
+
+    /**
      * @brief Check if shapes have changed since last inference
      *
      * @param input_shapes New input shapes to check
@@ -61,6 +69,20 @@ class ShapeInferenceEngine {
      */
     bool shapes_changed(const std::unordered_map<std::string, core::Shape>& input_shapes) const;
     bool shapes_changed(const std::vector<RuntimeInputShape>& input_shapes) const;
+
+    /**
+     * @brief Seed cached input shapes without running inference
+     *
+     * Useful when build-time shapes already match runtime inputs.
+     */
+    void seed_input_shapes(const std::vector<RuntimeInputShape>& input_shapes);
+
+    /**
+     * @brief Check if cached input shapes are available
+     */
+    bool has_cache() const {
+        return !last_input_shapes_.empty();
+    }
 
     /**
      * @brief Get list of tensors that need reallocation

@@ -16,42 +16,35 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_PATH="$SCRIPT_DIR/models/lenet5.onnx"
 SAMPLES_DIR="$SCRIPT_DIR/test_samples"
-EXEC_DEBUG="$SCRIPT_DIR/../../../build/bin/lenet5_optimized_with_memory_planning"
-EXEC_RELEASE="$SCRIPT_DIR/../../../build/Release/bin/lenet5_optimized_with_memory_planning"
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-# Select executable
-if [ "$BUILD_TYPE" = "Release" ]; then
-    EXECUTABLE="$EXEC_RELEASE"
-else
-    EXECUTABLE="$EXEC_DEBUG"
-fi
-
-# Fallback
-if [ ! -f "$EXECUTABLE" ]; then
-    if [ -f "$EXEC_DEBUG" ]; then
-        EXECUTABLE="$EXEC_DEBUG"
-        BUILD_TYPE="Debug"
-    elif [ -f "$EXEC_RELEASE" ]; then
-        EXECUTABLE="$EXEC_RELEASE"
-        BUILD_TYPE="Release"
+# Find executable
+EXECUTABLE=""
+for candidate in \
+    "$SCRIPT_DIR/../../../build/Debug/bin/lenet5_optimized_with_memory_planning" \
+    "$SCRIPT_DIR/../../../build/Release/bin/lenet5_optimized_with_memory_planning" \
+    "$SCRIPT_DIR/../../../build/bin/lenet5_optimized_with_memory_planning"
+do
+    if [ -x "$candidate" ]; then
+        EXECUTABLE="$candidate"
+        break
     fi
-fi
+done
 
 # Check executable
-if [ ! -f "$EXECUTABLE" ]; then
+if [ -z "$EXECUTABLE" ]; then
     echo -e "${RED}[ERROR] Executable not found${NC}"
     echo "Checked:"
-    echo "  $EXEC_DEBUG"
-    echo "  $EXEC_RELEASE"
+    echo "  $SCRIPT_DIR/../../../build/Debug/bin/lenet5_optimized_with_memory_planning"
+    echo "  $SCRIPT_DIR/../../../build/Release/bin/lenet5_optimized_with_memory_planning"
+    echo "  $SCRIPT_DIR/../../../build/bin/lenet5_optimized_with_memory_planning"
     echo ""
     echo "Please build the project first:"
-    echo "  cd build"
-    echo "  cmake --build . --config Debug"
+    echo "  cmake --build build/Debug --parallel"
     exit 1
 fi
 

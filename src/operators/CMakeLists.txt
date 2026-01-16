@@ -12,12 +12,28 @@ set(OPERATORS_SOURCES
 # Plugin implementations (CPU)
 set(PLUGIN_CPU_SOURCES
     cpu/relu_cpu.cpp
+    cpu/gelu_cpu.cpp
     cpu/flatten_cpu.cpp
     cpu/reshape_cpu.cpp
     cpu/softmax_cpu.cpp
     cpu/pooling_cpu.cpp
     cpu/linear_cpu.cpp
     cpu/conv2d_cpu.cpp
+    # BERT-specific operators
+    cpu/elementwise_cpu.cpp
+    cpu/transpose_cpu.cpp
+    cpu/squeeze_cpu.cpp
+    cpu/slice_cpu.cpp
+    cpu/concat_cpu.cpp
+    cpu/matmul_cpu.cpp
+    cpu/reduce_cpu.cpp
+    cpu/layernorm_cpu.cpp
+    cpu/gather_cpu.cpp
+    cpu/shape_cpu.cpp
+    cpu/cast_cpu.cpp
+    cpu/math_cpu.cpp
+    cpu/comparison_cpu.cpp
+    cpu/constant_of_shape_cpu.cpp
 )
 
 # Plugin implementations (CUDA)

@@ -1,8 +1,8 @@
 @echo off
 REM Complete End-to-End Test for LeNet-5
 REM This script should be run from models/python/lenet5 directory
-REM 
-REM Usage: test_lenet5.bat
+REM
+REM Usage: test_lenet5.bat [Debug|Release]
 REM
 REM Steps:
 REM 1. Generates reference outputs from PyTorch
@@ -11,11 +11,16 @@ REM 3. Compares the outputs
 
 setlocal enabledelayedexpansion
 
+REM Default to Debug if not specified
+set BUILD_TYPE=%1
+if "%BUILD_TYPE%"=="" set BUILD_TYPE=Debug
+
 echo ======================================================================
 echo LeNet-5 End-to-End Test Script
 echo ======================================================================
 echo.
 echo Working directory: %CD%
+echo Build type: %BUILD_TYPE%
 echo.
 
 REM Check if we are in the correct directory
@@ -68,7 +73,26 @@ echo.
 
 echo Step 2: Running C++ Mini-Infer Inference
 echo ----------------------------------------------------------------------
-..\..\..\build\windows-debug\bin\lenet5_inference.exe ^
+
+REM Find executable
+set EXECUTABLE=
+if exist "..\..\..\build\%BUILD_TYPE%\bin\lenet5_inference.exe" (
+    set EXECUTABLE=..\..\..\build\%BUILD_TYPE%\bin\lenet5_inference.exe
+) else if exist "..\..\..\build\bin\lenet5_inference.exe" (
+    set EXECUTABLE=..\..\..\build\bin\lenet5_inference.exe
+)
+
+if "%EXECUTABLE%"=="" (
+    echo Error: lenet5_inference.exe not found.
+    echo Please build the project first:
+    echo   cmake --build build/%BUILD_TYPE% --parallel
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Using executable: %EXECUTABLE%
+%EXECUTABLE% ^
     weights ^
     test_samples\binary ^
     --save-outputs test_samples\minfer_outputs.json
@@ -77,7 +101,7 @@ if %errorlevel% neq 0 (
     echo Error: Failed to run C++ inference
     echo.
     echo Note: Make sure lenet5_inference is compiled:
-    echo   cmake --build build --config Debug --target lenet5_inference
+    echo   cmake --build build/%BUILD_TYPE% --parallel
     echo.
     pause
     exit /b 1

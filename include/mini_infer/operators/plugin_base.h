@@ -119,6 +119,16 @@ struct ReshapeParam : public PluginParam {
 };
 
 /**
+ * @brief Expand operator parameters
+ */
+struct ExpandParam : public PluginParam {
+    std::vector<int64_t> shape;
+
+    ExpandParam() = default;
+    explicit ExpandParam(const std::vector<int64_t>& s) : shape(s) {}
+};
+
+/**
  * @brief Softmax operator parameters
  */
 struct SoftmaxParam : public PluginParam {
@@ -126,6 +136,101 @@ struct SoftmaxParam : public PluginParam {
 
     SoftmaxParam() = default;
     explicit SoftmaxParam(int a) : axis(a) {}
+};
+
+/**
+ * @brief Transpose operator parameters
+ */
+struct TransposeParam : public PluginParam {
+    std::vector<int64_t> perm;
+
+    TransposeParam() = default;
+    explicit TransposeParam(const std::vector<int64_t>& p) : perm(p) {}
+};
+
+/**
+ * @brief Gather operator parameters
+ */
+struct GatherParam : public PluginParam {
+    int64_t axis{0};
+
+    GatherParam() = default;
+    explicit GatherParam(int64_t a) : axis(a) {}
+};
+
+/**
+ * @brief Slice operator parameters
+ */
+struct SliceParam : public PluginParam {
+    std::vector<int64_t> starts;
+    std::vector<int64_t> ends;
+    std::vector<int64_t> axes;
+    std::vector<int64_t> steps;
+
+    SliceParam() = default;
+};
+
+/**
+ * @brief Squeeze/Unsqueeze operator parameters
+ */
+struct SqueezeParam : public PluginParam {
+    std::vector<int64_t> axes;
+
+    SqueezeParam() = default;
+    explicit SqueezeParam(const std::vector<int64_t>& a) : axes(a) {}
+};
+
+/**
+ * @brief ReduceMean operator parameters
+ */
+struct ReduceMeanParam : public PluginParam {
+    std::vector<int64_t> axes;
+    bool keepdims{true};
+
+    ReduceMeanParam() = default;
+    ReduceMeanParam(const std::vector<int64_t>& a, bool k) : axes(a), keepdims(k) {}
+};
+
+/**
+ * @brief LayerNorm operator parameters
+ */
+struct LayerNormParam : public PluginParam {
+    int64_t axis{-1};
+    float epsilon{1e-5f};
+
+    LayerNormParam() = default;
+    LayerNormParam(int64_t a, float eps) : axis(a), epsilon(eps) {}
+};
+
+/**
+ * @brief Cast operator parameters
+ */
+struct CastParam : public PluginParam {
+    core::DataType to_dtype{core::DataType::FLOAT32};
+
+    CastParam() = default;
+    explicit CastParam(core::DataType dt) : to_dtype(dt) {}
+};
+
+/**
+ * @brief Concat operator parameters
+ */
+struct ConcatParam : public PluginParam {
+    int64_t axis{0};
+
+    ConcatParam() = default;
+    explicit ConcatParam(int64_t a) : axis(a) {}
+};
+
+/**
+ * @brief ConstantOfShape operator parameters
+ */
+struct ConstantOfShapeParam : public PluginParam {
+    float value{0.0f};  // Default value to fill
+    core::DataType dtype{core::DataType::FLOAT32};
+
+    ConstantOfShapeParam() = default;
+    ConstantOfShapeParam(float v, core::DataType dt) : value(v), dtype(dt) {}
 };
 
 /**
@@ -220,6 +325,29 @@ public:
             input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
         output_dtypes.assign(output_shapes.size(), inferred);
         return core::Status::SUCCESS;
+    }
+
+    /**
+     * @brief Infer output shapes with access to constant input tensors
+     * @param input_shapes Input tensor shapes
+     * @param input_dtypes Input tensor dtypes
+     * @param input_tensors Constant input tensors (may contain nullptr for non-constant inputs)
+     * @param output_shapes Output tensor shapes (to be filled)
+     * @param output_dtypes Output tensor dtypes (to be filled)
+     * @return Status code
+     *
+     * This method allows plugins to read values from constant input tensors
+     * during shape inference. Useful for operators like Slice, Reshape, etc.
+     * Default behavior: delegates to infer_output_metadata (ignores tensors).
+     */
+    virtual core::Status infer_output_shapes_with_tensors(
+        const std::vector<core::Shape>& input_shapes,
+        const std::vector<core::DataType>& input_dtypes,
+        const std::vector<std::shared_ptr<core::Tensor>>& input_tensors,
+        std::vector<core::Shape>& output_shapes,
+        std::vector<core::DataType>& output_dtypes) const {
+        (void)input_tensors;
+        return infer_output_metadata(input_shapes, input_dtypes, output_shapes, output_dtypes);
     }
 
     // ========================================================================

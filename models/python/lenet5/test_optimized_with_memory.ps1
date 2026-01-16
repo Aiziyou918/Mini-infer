@@ -17,37 +17,32 @@ Write-Host ""
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $MODEL_PATH = Join-Path $SCRIPT_DIR "models\lenet5.onnx"
 $SAMPLES_DIR = Join-Path $SCRIPT_DIR "test_samples"
-$EXEC_DEBUG = Join-Path $SCRIPT_DIR "..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe"
-$EXEC_RELEASE = Join-Path $SCRIPT_DIR "..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe"
 
-# Select executable
-if ($BuildType -eq "Release") {
-    $EXECUTABLE = $EXEC_RELEASE
-} else {
-    $EXECUTABLE = $EXEC_DEBUG
-}
+# Find executable
+$candidates = @(
+    (Join-Path $SCRIPT_DIR "..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe"),
+    (Join-Path $SCRIPT_DIR "..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe"),
+    (Join-Path $SCRIPT_DIR "..\..\..\build\bin\lenet5_optimized_with_memory_planning.exe")
+)
 
-# Fallback
-if (-not (Test-Path $EXECUTABLE)) {
-    if (Test-Path $EXEC_DEBUG) {
-        $EXECUTABLE = $EXEC_DEBUG
-        $BuildType = "Debug"
-    } elseif (Test-Path $EXEC_RELEASE) {
-        $EXECUTABLE = $EXEC_RELEASE
-        $BuildType = "Release"
+$EXECUTABLE = $null
+foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+        $EXECUTABLE = $candidate
+        break
     }
 }
 
 # Check executable
-if (-not (Test-Path $EXECUTABLE)) {
+if (-not $EXECUTABLE) {
     Write-Host "[ERROR] Executable not found" -ForegroundColor Red
     Write-Host "Checked:"
-    Write-Host "  $EXEC_DEBUG"
-    Write-Host "  $EXEC_RELEASE"
+    foreach ($candidate in $candidates) {
+        Write-Host "  $candidate"
+    }
     Write-Host ""
     Write-Host "Please build the project first:"
-    Write-Host "  cd build"
-    Write-Host "  cmake --build . --config Debug"
+    Write-Host "  cmake --build build/Debug --parallel"
     exit 1
 }
 

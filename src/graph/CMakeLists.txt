@@ -4,6 +4,7 @@ set(GRAPH_SOURCES
     graph.cpp
     graph_optimizer.cpp
     fusion_pass.cpp
+    constant_folding_pass.cpp
 )
 
 add_library(mini_infer_graph ${GRAPH_SOURCES})

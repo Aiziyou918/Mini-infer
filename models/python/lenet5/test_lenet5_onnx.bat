@@ -89,7 +89,25 @@ echo.
 
 echo Step 3: Running C++ Mini-Infer ONNX Inference
 echo ----------------------------------------------------------------------
-..\..\..\build\%BUILD_TYPE%\bin\lenet5_onnx_test.exe ^
+
+REM Find executable
+set EXECUTABLE=
+if exist "..\..\..\build\%BUILD_TYPE%\bin\lenet5_onnx_test.exe" (
+    set EXECUTABLE=..\..\..\build\%BUILD_TYPE%\bin\lenet5_onnx_test.exe
+) else if exist "..\..\..\build\bin\lenet5_onnx_test.exe" (
+    set EXECUTABLE=..\..\..\build\bin\lenet5_onnx_test.exe
+)
+
+if "%EXECUTABLE%"=="" (
+    echo Error: lenet5_onnx_test.exe not found.
+    echo Please build the project first:
+    echo   cmake --build build/%BUILD_TYPE% --parallel
+    echo.
+    exit /b 1
+)
+
+echo Using executable: %EXECUTABLE%
+%EXECUTABLE% ^
     models\lenet5.onnx ^
     test_samples\binary ^
     --save-outputs test_samples\minfer_onnx_outputs.json
@@ -98,7 +116,7 @@ if errorlevel 1 (
     echo [ERROR] C++ inference failed
     echo.
     echo Note: Make sure lenet5_onnx_test is compiled:
-    echo   cmake --build build --config %BUILD_TYPE% --target lenet5_onnx_test
+    echo   cmake --build build/%BUILD_TYPE% --parallel
     echo.
     exit /b 1
 )

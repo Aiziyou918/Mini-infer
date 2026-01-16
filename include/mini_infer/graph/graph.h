@@ -161,11 +161,49 @@ class Graph {
      */
     bool is_output(const std::string& name) const;
 
+    // ========================================================================
+    // Constant Management (for constant folding optimization)
+    // ========================================================================
+
+    /**
+     * @brief Register a constant tensor (from initializer or folded result)
+     * @param node_id Node ID
+     * @param tensor Constant tensor value
+     */
+    void set_constant(size_t node_id, std::shared_ptr<core::Tensor> tensor);
+
+    /**
+     * @brief Get a constant tensor by node ID
+     * @param node_id Node ID
+     * @return Constant tensor, or nullptr if not found
+     */
+    std::shared_ptr<core::Tensor> get_constant(size_t node_id) const;
+
+    /**
+     * @brief Check if a node's output is a constant
+     * @param node_id Node ID
+     * @return true if the node's output is registered as a constant
+     */
+    bool is_constant(size_t node_id) const;
+
+    /**
+     * @brief Get all constants (read-only)
+     * @return Map of node ID to constant tensor
+     */
+    const std::unordered_map<size_t, std::shared_ptr<core::Tensor>>& constants() const {
+        return constants_;
+    }
+
    private:
     std::vector<std::shared_ptr<Node>> nodes_;
     std::unordered_map<std::string, size_t> name_to_id_;
     std::vector<std::string> input_names_;
     std::vector<std::string> output_names_;
+
+    // Constant tensors storage (node_id -> Tensor)
+    // Used for constant folding optimization
+    // Using node ID instead of string for O(1) lookup with integer hash
+    std::unordered_map<size_t, std::shared_ptr<core::Tensor>> constants_;
 };
 
 }  // namespace graph

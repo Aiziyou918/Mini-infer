@@ -40,6 +40,22 @@ cmake --build --preset conan-debug
 ./build/Debug/bin/onnx_parser_example ./models/python/lenet5/models/lenet5.onnx
 ```
 
+Tiny-BERT 情感分类示例：
+
+```bash
+# Windows
+.\build\Debug\bin\bert_inference.exe ^
+  .\models\python\bert\models\bert_tiny.onnx ^
+  .\models\python\bert\test_samples ^
+  10
+
+# Linux/macOS
+./build/Debug/bin/bert_inference \
+  ./models/python/bert/models/bert_tiny.onnx \
+  ./models/python/bert/test_samples \
+  10
+```
+
 ## 📋 详细构建流程
 
 ### 基本流程（3 步）

@@ -56,16 +56,21 @@ endif()
 
 # Interface alias to keep kernel registry TU linked in static builds
 add_library(mini_infer_kernels_all INTERFACE)
-target_link_libraries(mini_infer_kernels_all
-    INTERFACE
-        $<$<OR:$<BOOL:${BUILD_SHARED_LIBS}>,$<BOOL:${MSVC}>>:mini_infer_kernels>
-        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--whole-archive>
-        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:$<TARGET_FILE:mini_infer_kernels>>
-        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:-Wl,--no-whole-archive>
-        $<$<AND:$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>,$<NOT:$<BOOL:${MSVC}>>>:mini_infer_kernels>
-)
-if (NOT BUILD_SHARED_LIBS AND MSVC)
+if(MSVC)
+    target_link_libraries(mini_infer_kernels_all INTERFACE mini_infer_kernels)
     target_link_options(mini_infer_kernels_all INTERFACE "/WHOLEARCHIVE:mini_infer_kernels")
+elseif(APPLE)
+    target_link_libraries(mini_infer_kernels_all INTERFACE
+        -Wl,-force_load,$<TARGET_FILE:mini_infer_kernels>
+    )
+else()
+    # Linux/Unix: use --whole-archive to force all symbols to be linked
+    target_link_libraries(mini_infer_kernels_all INTERFACE
+        -Wl,--whole-archive
+        $<TARGET_FILE:mini_infer_kernels>
+        -Wl,--no-whole-archive
+        mini_infer_kernels  # For transitive dependencies
+    )
 endif()
 
 # Set library properties

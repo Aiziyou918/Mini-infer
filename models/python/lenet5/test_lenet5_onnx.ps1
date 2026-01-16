@@ -90,18 +90,39 @@ Write-Host ""
 
 Write-Host "Step 3: Running C++ Mini-Infer ONNX Inference" -ForegroundColor Yellow
 Write-Host "----------------------------------------------------------------------"
-$exePath = "..\..\..\build\$BuildType\bin\lenet5_onnx_test.exe"
 
-if (-not (Test-Path $exePath)) {
+# Find executable
+$ScriptDir = Split-Path -Parent $PSCommandPath
+$candidates = @(
+    (Join-Path $ScriptDir "..\..\..\build\$BuildType\bin\lenet5_onnx_test.exe"),
+    (Join-Path $ScriptDir "..\..\..\build\Debug\bin\lenet5_onnx_test.exe"),
+    (Join-Path $ScriptDir "..\..\..\build\Release\bin\lenet5_onnx_test.exe"),
+    (Join-Path $ScriptDir "..\..\..\build\bin\lenet5_onnx_test.exe")
+)
+
+$exePath = $null
+foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+        $exePath = $candidate
+        break
+    }
+}
+
+if (-not $exePath) {
     Write-Host ""
-    Write-Host "[ERROR] Executable not found: $exePath" -ForegroundColor Red
+    Write-Host "[ERROR] lenet5_onnx_test.exe not found." -ForegroundColor Red
+    Write-Host "Checked paths:" -ForegroundColor Yellow
+    foreach ($candidate in $candidates) {
+        Write-Host "  $candidate"
+    }
     Write-Host ""
-    Write-Host "Note: Make sure lenet5_onnx_test is compiled:"
-    Write-Host "  cmake --build build --config $BuildType --target lenet5_onnx_test"
+    Write-Host "Please build the project first:"
+    Write-Host "  cmake --build build/$BuildType --parallel"
     Write-Host ""
     exit 1
 }
 
+Write-Host "Using executable: $exePath" -ForegroundColor Green
 & $exePath `
     models\lenet5.onnx `
     test_samples\binary `

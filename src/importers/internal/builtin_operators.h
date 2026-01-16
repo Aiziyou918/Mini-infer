@@ -63,6 +63,20 @@ public:
 };
 
 /**
+ * @brief Gelu operator importer
+ *
+ * ONNX Gelu operator:
+ * - Inputs: X
+ * - Outputs: Y
+ * - No attributes
+ */
+class GeluImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Gelu"; }
+};
+
+/**
  * @brief MaxPool operator importer
  * 
  * ONNX MaxPool operator:
@@ -134,7 +148,7 @@ public:
 
 /**
  * @brief Mul operator importer
- * 
+ *
  * ONNX Mul operator:
  * - Inputs: A, B
  * - Outputs: C
@@ -144,6 +158,273 @@ class MulImporter : public OperatorImporter {
 public:
     core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
     const char* get_op_type() const override { return "Mul"; }
+};
+
+/**
+ * @brief Sub operator importer
+ *
+ * ONNX Sub operator:
+ * - Inputs: A, B
+ * - Outputs: C
+ * - No attributes (element-wise subtraction)
+ */
+class SubImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Sub"; }
+};
+
+/**
+ * @brief Div operator importer
+ *
+ * ONNX Div operator:
+ * - Inputs: A, B
+ * - Outputs: C
+ * - No attributes (element-wise division)
+ */
+class DivImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Div"; }
+};
+
+/**
+ * @brief Transpose operator importer
+ *
+ * ONNX Transpose operator:
+ * - Inputs: data
+ * - Outputs: transposed
+ * - Attributes: perm
+ */
+class TransposeImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Transpose"; }
+};
+
+/**
+ * @brief Squeeze operator importer
+ *
+ * ONNX Squeeze operator:
+ * - Inputs: data, [axes]
+ * - Outputs: squeezed
+ */
+class SqueezeImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Squeeze"; }
+};
+
+/**
+ * @brief Unsqueeze operator importer
+ *
+ * ONNX Unsqueeze operator:
+ * - Inputs: data, axes
+ * - Outputs: expanded
+ */
+class UnsqueezeImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Unsqueeze"; }
+};
+
+/**
+ * @brief Slice operator importer
+ *
+ * ONNX Slice operator:
+ * - Inputs: data, starts, ends, [axes], [steps]
+ * - Outputs: output
+ */
+class SliceImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Slice"; }
+};
+
+/**
+ * @brief Gather operator importer
+ *
+ * ONNX Gather operator:
+ * - Inputs: data, indices
+ * - Outputs: output
+ * - Attributes: axis
+ */
+class GatherImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Gather"; }
+};
+
+/**
+ * @brief Shape operator importer
+ *
+ * ONNX Shape operator:
+ * - Inputs: data
+ * - Outputs: shape
+ */
+class ShapeImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Shape"; }
+};
+
+/**
+ * @brief Cast operator importer
+ *
+ * ONNX Cast operator:
+ * - Inputs: input
+ * - Outputs: output
+ * - Attributes: to
+ */
+class CastImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Cast"; }
+};
+
+/**
+ * @brief ReduceMean operator importer
+ *
+ * ONNX ReduceMean operator:
+ * - Inputs: data
+ * - Outputs: reduced
+ * - Attributes: axes, keepdims
+ */
+class ReduceMeanImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "ReduceMean"; }
+};
+
+/**
+ * @brief LayerNormalization operator importer
+ *
+ * ONNX LayerNormalization operator:
+ * - Inputs: X, Scale, [B]
+ * - Outputs: Y, [Mean], [InvStdDev]
+ * - Attributes: axis, epsilon
+ */
+class LayerNormalizationImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "LayerNormalization"; }
+};
+
+/**
+ * @brief Pow operator importer
+ *
+ * ONNX Pow operator:
+ * - Inputs: X, Y
+ * - Outputs: Z
+ */
+class PowImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Pow"; }
+};
+
+/**
+ * @brief Sqrt operator importer
+ *
+ * ONNX Sqrt operator:
+ * - Inputs: X
+ * - Outputs: Y
+ */
+class SqrtImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Sqrt"; }
+};
+
+/**
+ * @brief Erf operator importer
+ *
+ * ONNX Erf operator:
+ * - Inputs: input
+ * - Outputs: output
+ */
+class ErfImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Erf"; }
+};
+
+/**
+ * @brief Tanh operator importer
+ *
+ * ONNX Tanh operator:
+ * - Inputs: input
+ * - Outputs: output
+ */
+class TanhImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Tanh"; }
+};
+
+/**
+ * @brief Neg operator importer
+ *
+ * ONNX Neg operator:
+ * - Inputs: X
+ * - Outputs: Y
+ */
+class NegImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Neg"; }
+};
+
+/**
+ * @brief Exp operator importer
+ *
+ * ONNX Exp operator:
+ * - Inputs: input
+ * - Outputs: output
+ */
+class ExpImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Exp"; }
+};
+
+/**
+ * @brief Equal operator importer
+ *
+ * ONNX Equal operator:
+ * - Inputs: A, B
+ * - Outputs: C
+ */
+class EqualImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Equal"; }
+};
+
+/**
+ * @brief Where operator importer
+ *
+ * ONNX Where operator:
+ * - Inputs: condition, X, Y
+ * - Outputs: output
+ */
+class WhereImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Where"; }
+};
+
+/**
+ * @brief Expand operator importer
+ *
+ * ONNX Expand operator:
+ * - Inputs: input, shape
+ * - Outputs: output
+ */
+class ExpandImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "Expand"; }
 };
 
 /**
@@ -214,6 +495,20 @@ class ConstantImporter : public OperatorImporter {
 public:
     core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
     const char* get_op_type() const override { return "Constant"; }
+};
+
+/**
+ * @brief ConstantOfShape operator importer
+ *
+ * ONNX ConstantOfShape operator:
+ * - Inputs: shape (1D tensor)
+ * - Outputs: output
+ * - Attributes: value (optional tensor with single element)
+ */
+class ConstantOfShapeImporter : public OperatorImporter {
+public:
+    core::Status import_operator(ImporterContext& ctx, const onnx::NodeProto& node) override;
+    const char* get_op_type() const override { return "ConstantOfShape"; }
 };
 
 // Register all builtin operators to registry

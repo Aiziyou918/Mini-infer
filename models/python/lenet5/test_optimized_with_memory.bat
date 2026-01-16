@@ -21,37 +21,27 @@ REM Configuration (relative to script dir)
 set "SCRIPT_DIR=%~dp0"
 set "MODEL_PATH=%SCRIPT_DIR%models\lenet5.onnx"
 set "SAMPLES_DIR=%SCRIPT_DIR%test_samples"
-set "EXEC_DEBUG=%SCRIPT_DIR%..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe"
-set "EXEC_RELEASE=%SCRIPT_DIR%..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe"
 
-REM Select executable based on build type
-if /i "%BUILD_TYPE%"=="Release" (
-    set "EXECUTABLE=%EXEC_RELEASE%"
-) else (
-    set "EXECUTABLE=%EXEC_DEBUG%"
-)
-
-REM Fallback if specified build type doesn't exist
-if not exist "%EXECUTABLE%" (
-    if exist "%EXEC_DEBUG%" (
-        set "EXECUTABLE=%EXEC_DEBUG%"
-        set "BUILD_TYPE=Debug"
-    ) else if exist "%EXEC_RELEASE%" (
-        set "EXECUTABLE=%EXEC_RELEASE%"
-        set "BUILD_TYPE=Release"
-    )
+REM Find executable
+set "EXECUTABLE="
+if exist "%SCRIPT_DIR%..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe" (
+    set "EXECUTABLE=%SCRIPT_DIR%..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe"
+) else if exist "%SCRIPT_DIR%..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe" (
+    set "EXECUTABLE=%SCRIPT_DIR%..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe"
+) else if exist "%SCRIPT_DIR%..\..\..\build\bin\lenet5_optimized_with_memory_planning.exe" (
+    set "EXECUTABLE=%SCRIPT_DIR%..\..\..\build\bin\lenet5_optimized_with_memory_planning.exe"
 )
 
 REM Check if executable exists
-if not exist "%EXECUTABLE%" (
-    echo [ERROR] Executable not found in Debug/Release.
+if "%EXECUTABLE%"=="" (
+    echo [ERROR] Executable not found.
     echo Checked:
-    echo   %EXEC_DEBUG%
-    echo   %EXEC_RELEASE%
+    echo   %SCRIPT_DIR%..\..\..\build\Debug\bin\lenet5_optimized_with_memory_planning.exe
+    echo   %SCRIPT_DIR%..\..\..\build\Release\bin\lenet5_optimized_with_memory_planning.exe
+    echo   %SCRIPT_DIR%..\..\..\build\bin\lenet5_optimized_with_memory_planning.exe
     echo.
     echo Please build the project first:
-    echo   cd build
-    echo   cmake --build . --config Debug
+    echo   cmake --build build/Debug --parallel
     exit /b 1
 )
 
