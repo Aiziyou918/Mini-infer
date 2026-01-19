@@ -13,7 +13,7 @@ ShapeInferenceEngine::ShapeInferenceEngine(std::shared_ptr<graph::Graph> graph) 
 
 core::Status ShapeInferenceEngine::ensure_sorted() {
     if (sorted_nodes_.empty()) {
-        auto status = graph_->checked_topological_sort(sorted_nodes_);
+        auto status = graph_->checked_topological_sort();
         if (status != core::Status::SUCCESS) {
             MI_LOG_ERROR("[ShapeInferenceEngine] Topological sort failed");
             return status;
@@ -80,10 +80,9 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
     // TensorRT-style: evaluate shape tensors symbolically
     ShapeTensorEvaluator shape_evaluator;
     shape_evaluator.initialize(graph_);
-    shape_evaluator.seed_from_initializers();
-    shape_evaluator.set_known_output_shapes(&inferred_shapes_);
+    shape_evaluator.seed_from_graph_constants();
 
-    std::unordered_map<std::string, core::Shape> input_shapes_map;
+    std::unordered_map<size_t, core::Shape> input_shapes_map;
 
     // Store input shapes (by node ID)
     for (const auto& binding : input_shapes) {
@@ -92,7 +91,7 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
         }
         auto node = graph_->get_node(binding.node_id);
         if (node) {
-            input_shapes_map[node->name()] = binding.shape;
+            input_shapes_map[node->id()] = binding.shape;
         }
     }
 
@@ -326,10 +325,12 @@ core::Status ShapeInferenceEngine::infer_shapes_internal(
             inferred_shapes_[node_id] = output_shapes;
         }
 
-        // Update shape evaluator with newly inferred shapes
+        // Incrementally update shape evaluator when new shapes are inferred
+        // This allows Reshape nodes to get dynamically computed target shapes
         if (!output_shapes.empty() && output_shapes[0].ndim() > 0) {
-            input_shapes_map[node->name()] = output_shapes[0];
-            shape_evaluator.evaluate(input_shapes_map);
+            input_shapes_map[node->id()] = output_shapes[0];
+            // Trigger incremental evaluation for dependent shape tensor nodes
+            shape_evaluator.incremental_evaluate(node->id(), output_shapes[0]);
         }
 
         total_inferred++;

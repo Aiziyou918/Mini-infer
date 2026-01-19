@@ -45,13 +45,16 @@ core::Status InferencePlan::build(std::shared_ptr<graph::Graph> graph) {
 
     // Step 2: Topological sort with validation
     MI_LOG_INFO("[InferencePlan] Step 2: Performing topological sort...");
-    auto status = graph_->checked_topological_sort(sorted_nodes_);
+    // Use cached topological sort (TensorRT-style)
+    // First validate inputs/outputs, then use cached result
+    auto status = graph_->checked_topological_sort();
     if (status != core::Status::SUCCESS) {
         MI_LOG_ERROR("[InferencePlan] Topological sort failed");
         return status;
     }
+
     MI_LOG_INFO("[InferencePlan] Topological sort completed: " +
-                std::to_string(sorted_nodes_.size()) + " nodes");
+            std::to_string(graph_->get_sorted_nodes().size()) + " nodes");
 
     auto binding_status = initialize_input_bindings();
     if (binding_status != core::Status::SUCCESS) {
@@ -192,7 +195,7 @@ core::Status InferencePlan::execute(ExecutionContext* ctx) const {
     }
 
     // Execute all nodes (skip placeholder nodes without operator)
-    for (const auto& node : sorted_nodes_) {
+    for (const auto& node : graph_->get_sorted_nodes()) {
         if (!node || !node->get_operator()) {
             continue;
         }
@@ -223,245 +226,262 @@ core::Status InferencePlan::optimize_graph() {
 }
 
 core::Status InferencePlan::infer_shapes() {
-    int total_inferred = 0;
-
     // TensorRT-style: Use ShapeTensorEvaluator for shape tensor evaluation
-    // This separates shape tensor evaluation from regular shape inference
     ShapeTensorEvaluator shape_evaluator;
     shape_evaluator.initialize(graph_);
-    shape_evaluator.seed_from_initializers();
+    shape_evaluator.seed_from_graph_constants();
 
     // Build input shapes map for shape tensor evaluation
-    std::unordered_map<std::string, core::Shape> input_shapes_map;
+    std::unordered_map<size_t, core::Shape> input_shapes_map;
     for (const auto& binding : input_bindings_) {
         if (binding.node && !binding.node->output_tensors().empty() &&
             binding.node->output_tensors()[0]) {
-            input_shapes_map[binding.name] = binding.node->output_tensors()[0]->shape();
+            input_shapes_map[binding.node_id] = binding.node->output_tensors()[0]->shape();
         }
     }
 
     // Initial shape tensor evaluation pass
     shape_evaluator.evaluate(input_shapes_map);
 
-    for (const auto& node : sorted_nodes_) {
-        if (!node) {
+    int total_inferred = 0;
+
+    for (const auto& node : graph_->get_sorted_nodes()) {
+        if (!node || !node->get_operator()) {
             continue;
         }
 
-        if (!node->get_operator()) {
-            continue;
-        }
-
-        std::vector<core::Shape> input_shapes;
-        std::vector<core::DataType> input_dtypes;
-        const auto& input_edges = node->inputs();
-        size_t graph_input_count = 0;
-
-        if (!input_edges.empty()) {
-            int max_dst_port = -1;
-            for (const auto& edge : input_edges) {
-                max_dst_port = std::max(max_dst_port, edge.dst_port);
-            }
-            graph_input_count = static_cast<size_t>(max_dst_port + 1);
-            input_shapes.resize(graph_input_count);
-            input_dtypes.resize(graph_input_count, core::DataType::FLOAT32);
-        }
-
-        for (const auto& edge : input_edges) {
-            if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
-                continue;
-            }
-            const auto& outputs = edge.node->output_tensors();
-            const size_t src_index = static_cast<size_t>(edge.src_port);
-            const size_t dst_index = static_cast<size_t>(edge.dst_port);
-            if (src_index >= outputs.size() || !outputs[src_index]) {
-                continue;
-            }
-            if (dst_index >= input_shapes.size()) {
-                continue;
-            }
-            input_shapes[dst_index] = outputs[src_index]->shape();
-            input_dtypes[dst_index] = outputs[src_index]->dtype();
-        }
-
-        const auto& imported_inputs = node->input_tensors();
-        if (!imported_inputs.empty()) {
-            if (graph_input_count > 0) {
-                const size_t limit = std::min(imported_inputs.size(), input_shapes.size());
-                for (size_t i = 0; i < limit; ++i) {
-                    if (input_shapes[i].ndim() == 0 && imported_inputs[i]) {
-                        input_shapes[i] = imported_inputs[i]->shape();
-                        input_dtypes[i] = imported_inputs[i]->dtype();
-                    }
-                }
-            } else {
-                bool has_missing_shape = false;
-                for (const auto& shape : input_shapes) {
-                    if (shape.ndim() == 0) {
-                        has_missing_shape = true;
-                        break;
-                    }
-                }
-                if (has_missing_shape) {
-                    input_shapes.clear();
-                    input_dtypes.clear();
-                    for (const auto& tensor : imported_inputs) {
-                        if (tensor) {
-                            input_shapes.push_back(tensor->shape());
-                            input_dtypes.push_back(tensor->dtype());
-                        }
-                    }
-                }
-            }
-        }
-
-        for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
-            if (imported_inputs[i]) {
-                input_shapes.push_back(imported_inputs[i]->shape());
-                input_dtypes.push_back(imported_inputs[i]->dtype());
-            }
-        }
-
-        if (graph_input_count == 0 && !imported_inputs.empty()) {
-            input_shapes.clear();
-            input_dtypes.clear();
-            for (const auto& tensor : imported_inputs) {
-                if (tensor) {
-                    input_shapes.push_back(tensor->shape());
-                    input_dtypes.push_back(tensor->dtype());
-                }
-            }
-        }
-
-        // Create plugin for this node (used for both shape inference and execution)
-        auto plugin = operators::PluginRegistry::instance().create_plugin(
-            node->type(), config_.device_type);
-
-        std::vector<core::Shape> output_shapes;
-        std::vector<core::DataType> output_dtypes;
-        core::Status status;
-
-        // Use plugin for shape inference if available
-        if (plugin) {
-            // Transfer parameters from GenericOperator to plugin if available
-            auto* generic_op = dynamic_cast<operators::GenericOperator*>(node->get_operator().get());
-            if (generic_op && generic_op->plugin_param()) {
-                plugin->set_param(generic_op->plugin_param());
-            }
-
-            // Build input tensors list for shape inference with tensor values
-            std::vector<std::shared_ptr<core::Tensor>> input_tensors_for_inference;
-            input_tensors_for_inference.resize(input_shapes.size());
-
-            // First, fill from graph edges (output tensors of predecessor nodes)
-            // Priority: shape_values from evaluator > output_tensors with data > output_tensors without data
-            for (const auto& edge : input_edges) {
-                if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
-                    continue;
-                }
-                const size_t dst_index = static_cast<size_t>(edge.dst_port);
-                if (dst_index >= input_tensors_for_inference.size()) {
-                    continue;
-                }
-
-                // Check shape_values from evaluator first (TensorRT-style)
-                auto* shape_value = shape_evaluator.get_shape_value(edge.node->id());
-                if (shape_value && shape_value->is_valid) {
-                    // Create a tensor from shape_value
-                    core::Shape sv_shape({static_cast<int64_t>(shape_value->data.size())});
-                    auto sv_tensor = std::make_shared<core::Tensor>(
-                        sv_shape, shape_value->dtype, core::DeviceType::CPU);
-                    if (shape_value->dtype == core::DataType::INT64) {
-                        std::memcpy(sv_tensor->data(), shape_value->data.data(),
-                                    shape_value->data.size() * sizeof(int64_t));
-                    } else if (shape_value->dtype == core::DataType::INT32) {
-                        int32_t* dst = static_cast<int32_t*>(sv_tensor->data());
-                        for (size_t i = 0; i < shape_value->data.size(); ++i) {
-                            dst[i] = static_cast<int32_t>(shape_value->data[i]);
-                        }
-                    }
-                    input_tensors_for_inference[dst_index] = sv_tensor;
-                    continue;
-                }
-
-                // Fall back to output tensors
-                const auto& outputs = edge.node->output_tensors();
-                const size_t src_index = static_cast<size_t>(edge.src_port);
-                if (src_index < outputs.size() && outputs[src_index]) {
-                    input_tensors_for_inference[dst_index] = outputs[src_index];
-                }
-            }
-
-            // Then, fill from imported inputs (constants/weights)
-            for (size_t i = 0; i < imported_inputs.size() && i < input_tensors_for_inference.size(); ++i) {
-                if (!input_tensors_for_inference[i] && imported_inputs[i]) {
-                    input_tensors_for_inference[i] = imported_inputs[i];
-                }
-            }
-
-            status = plugin->infer_output_shapes_with_tensors(input_shapes, input_dtypes,
-                                                              input_tensors_for_inference,
-                                                              output_shapes, output_dtypes);
-        } else {
-            MI_LOG_ERROR("[InferencePlan] No plugin available for node: " + node->name());
-            return core::Status::ERROR_NOT_IMPLEMENTED;
-        }
-
+        auto status = infer_single_node(node, shape_evaluator, input_shapes_map, total_inferred);
         if (status != core::Status::SUCCESS) {
-            MI_LOG_ERROR("[InferencePlan] Failed to infer shape for node: " + node->name() +
-                         " (status=" + std::to_string(static_cast<int>(status)) + ")");
             return status;
-        }
-        if (output_dtypes.size() != output_shapes.size()) {
-            const core::DataType fallback =
-                input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
-            output_dtypes.assign(output_shapes.size(), fallback);
-        }
-
-        if (output_shapes.empty()) {
-            MI_LOG_ERROR("[InferencePlan] Node " + node->name() + " produced empty output shapes");
-            return core::Status::ERROR_RUNTIME;
-        }
-
-        auto& output_tensors = node->output_tensors();
-        while (output_tensors.size() < output_shapes.size()) {
-            output_tensors.push_back(std::make_shared<core::Tensor>());
-        }
-
-        for (size_t i = 0; i < output_shapes.size() && i < output_tensors.size(); ++i) {
-            if (!output_tensors[i]) {
-                output_tensors[i] = std::make_shared<core::Tensor>();
-            }
-            output_tensors[i]->set_shape_metadata(output_shapes[i]);
-            if (i < output_dtypes.size()) {
-                output_tensors[i]->set_dtype(output_dtypes[i]);
-            }
-
-            total_inferred++;
-
-            if (config_.enable_profiling) {
-                MI_LOG_INFO("[InferencePlan] Node " + node->name() + " output[" +
-                            std::to_string(i) + "] shape: " + output_shapes[i].to_string());
-            }
-        }
-
-        // After inferring this node's output shape, update input_shapes_map and
-        // re-evaluate shape tensors that might depend on this node's output shape
-        if (!output_shapes.empty() && output_shapes[0].ndim() > 0) {
-            input_shapes_map[node->name()] = output_shapes[0];
-            // Re-evaluate shape tensors - this handles Shape nodes that depend on
-            // execution tensors whose shapes are now known
-            shape_evaluator.evaluate(input_shapes_map);
-        }
-
-        // Cache plugin for execution
-        if (plugin && node->get_operator()->cached_plugin() == nullptr) {
-            node->get_operator()->set_cached_plugin(std::move(plugin));
         }
     }
 
     MI_LOG_INFO("[InferencePlan] Shape inference completed: " + std::to_string(total_inferred) +
                 " tensor(s) inferred");
+
+    return core::Status::SUCCESS;
+}
+
+void InferencePlan::collect_node_inputs(
+    const std::shared_ptr<graph::Node>& node,
+    std::vector<core::Shape>& input_shapes,
+    std::vector<core::DataType>& input_dtypes) const {
+
+    input_shapes.clear();
+    input_dtypes.clear();
+
+    const auto& input_edges = node->inputs();
+    const auto& imported_inputs = node->input_tensors();
+
+    // Determine input count from graph edges
+    size_t graph_input_count = 0;
+    if (!input_edges.empty()) {
+        int max_dst_port = -1;
+        for (const auto& edge : input_edges) {
+            max_dst_port = std::max(max_dst_port, edge.dst_port);
+        }
+        graph_input_count = static_cast<size_t>(max_dst_port + 1);
+        input_shapes.resize(graph_input_count);
+        input_dtypes.resize(graph_input_count, core::DataType::FLOAT32);
+    }
+
+    // Fill from graph edges
+    for (const auto& edge : input_edges) {
+        if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
+            continue;
+        }
+        const auto& outputs = edge.node->output_tensors();
+        const size_t src_index = static_cast<size_t>(edge.src_port);
+        const size_t dst_index = static_cast<size_t>(edge.dst_port);
+        if (src_index >= outputs.size() || !outputs[src_index]) {
+            continue;
+        }
+        if (dst_index >= input_shapes.size()) {
+            continue;
+        }
+        input_shapes[dst_index] = outputs[src_index]->shape();
+        input_dtypes[dst_index] = outputs[src_index]->dtype();
+    }
+
+    // Fill missing slots from imported inputs
+    if (!imported_inputs.empty()) {
+        if (graph_input_count > 0) {
+            const size_t limit = std::min(imported_inputs.size(), input_shapes.size());
+            for (size_t i = 0; i < limit; ++i) {
+                if (input_shapes[i].ndim() == 0 && imported_inputs[i]) {
+                    input_shapes[i] = imported_inputs[i]->shape();
+                    input_dtypes[i] = imported_inputs[i]->dtype();
+                }
+            }
+        }
+    }
+
+    // Append extra imported inputs beyond graph edges
+    for (size_t i = graph_input_count; i < imported_inputs.size(); ++i) {
+        if (imported_inputs[i]) {
+            input_shapes.push_back(imported_inputs[i]->shape());
+            input_dtypes.push_back(imported_inputs[i]->dtype());
+        }
+    }
+
+    // Fallback: if no graph edges, use imported inputs only
+    if (graph_input_count == 0 && !imported_inputs.empty()) {
+        input_shapes.clear();
+        input_dtypes.clear();
+        for (const auto& tensor : imported_inputs) {
+            if (tensor) {
+                input_shapes.push_back(tensor->shape());
+                input_dtypes.push_back(tensor->dtype());
+            }
+        }
+    }
+}
+
+void InferencePlan::build_input_tensors_for_inference(
+    const std::shared_ptr<graph::Node>& node,
+    const ShapeTensorEvaluator& shape_evaluator,
+    const std::vector<core::Shape>& input_shapes,
+    std::vector<std::shared_ptr<core::Tensor>>& input_tensors) const {
+
+    input_tensors.clear();
+    input_tensors.resize(input_shapes.size());
+
+    const auto& input_edges = node->inputs();
+    const auto& imported_inputs = node->input_tensors();
+
+    // Fill from graph edges (priority: shape_values > output_tensors)
+    for (const auto& edge : input_edges) {
+        if (!edge.node || edge.dst_port < 0 || edge.src_port < 0) {
+            continue;
+        }
+        const size_t dst_index = static_cast<size_t>(edge.dst_port);
+        if (dst_index >= input_tensors.size()) {
+            continue;
+        }
+
+        // Check shape_values from evaluator first (TensorRT-style)
+        auto* shape_value = shape_evaluator.get_shape_value(edge.node->id());
+        if (shape_value && shape_value->is_valid) {
+            // Create tensor from shape_value
+            core::Shape sv_shape({static_cast<int64_t>(shape_value->data.size())});
+            auto sv_tensor = std::make_shared<core::Tensor>(
+                sv_shape, shape_value->dtype, core::DeviceType::CPU);
+            if (shape_value->dtype == core::DataType::INT64) {
+                std::memcpy(sv_tensor->data(), shape_value->data.data(),
+                            shape_value->data.size() * sizeof(int64_t));
+            } else if (shape_value->dtype == core::DataType::INT32) {
+                int32_t* dst = static_cast<int32_t*>(sv_tensor->data());
+                for (size_t i = 0; i < shape_value->data.size(); ++i) {
+                    dst[i] = static_cast<int32_t>(shape_value->data[i]);
+                }
+            }
+            input_tensors[dst_index] = sv_tensor;
+            continue;
+        }
+
+        // Fall back to output tensors
+        const auto& outputs = edge.node->output_tensors();
+        const size_t src_index = static_cast<size_t>(edge.src_port);
+        if (src_index < outputs.size() && outputs[src_index]) {
+            input_tensors[dst_index] = outputs[src_index];
+        }
+    }
+
+    // Fill from imported inputs (constants/weights)
+    for (size_t i = 0; i < imported_inputs.size() && i < input_tensors.size(); ++i) {
+        if (!input_tensors[i] && imported_inputs[i]) {
+            input_tensors[i] = imported_inputs[i];
+        }
+    }
+}
+
+core::Status InferencePlan::infer_single_node(
+    const std::shared_ptr<graph::Node>& node,
+    ShapeTensorEvaluator& shape_evaluator,
+    std::unordered_map<size_t, core::Shape>& input_shapes_map,
+    int& total_inferred) {
+
+    // 1. Collect input shapes and dtypes
+    std::vector<core::Shape> input_shapes;
+    std::vector<core::DataType> input_dtypes;
+    collect_node_inputs(node, input_shapes, input_dtypes);
+
+    // 2. Create and configure plugin
+    auto plugin = operators::PluginRegistry::instance().create_plugin(
+        node->type(), config_.device_type);
+    if (!plugin) {
+        MI_LOG_ERROR("[InferencePlan] No plugin available for node: " + node->name());
+        return core::Status::ERROR_NOT_IMPLEMENTED;
+    }
+
+    auto* generic_op = dynamic_cast<operators::GenericOperator*>(node->get_operator().get());
+    if (generic_op && generic_op->plugin_param()) {
+        plugin->set_param(generic_op->plugin_param());
+    }
+
+    // 3. Build input tensors for inference
+    std::vector<std::shared_ptr<core::Tensor>> input_tensors;
+    build_input_tensors_for_inference(node, shape_evaluator, input_shapes, input_tensors);
+
+    // 4. Infer output shapes
+    std::vector<core::Shape> output_shapes;
+    std::vector<core::DataType> output_dtypes;
+    auto status = plugin->infer_output_shapes_with_tensors(
+        input_shapes, input_dtypes, input_tensors, output_shapes, output_dtypes);
+
+    if (status != core::Status::SUCCESS) {
+        MI_LOG_ERROR("[InferencePlan] Failed to infer shape for node: " + node->name() +
+                     " (status=" + std::to_string(static_cast<int>(status)) + ")");
+        return status;
+    }
+
+    if (output_shapes.empty()) {
+        MI_LOG_ERROR("[InferencePlan] Node " + node->name() + " produced empty output shapes");
+        return core::Status::ERROR_RUNTIME;
+    }
+
+    // Fix output dtypes if needed
+    if (output_dtypes.size() != output_shapes.size()) {
+        const core::DataType fallback =
+            input_dtypes.empty() ? core::DataType::FLOAT32 : input_dtypes[0];
+        output_dtypes.assign(output_shapes.size(), fallback);
+    }
+
+    // 5. Update node output tensors
+    auto& output_tensors = node->output_tensors();
+    while (output_tensors.size() < output_shapes.size()) {
+        output_tensors.push_back(std::make_shared<core::Tensor>());
+    }
+
+    for (size_t i = 0; i < output_shapes.size() && i < output_tensors.size(); ++i) {
+        if (!output_tensors[i]) {
+            output_tensors[i] = std::make_shared<core::Tensor>();
+        }
+        output_tensors[i]->set_shape_metadata(output_shapes[i]);
+        if (i < output_dtypes.size()) {
+            output_tensors[i]->set_dtype(output_dtypes[i]);
+        }
+        total_inferred++;
+
+        if (config_.enable_profiling) {
+            MI_LOG_DEBUG("[InferencePlan] Node " + node->name() + " output[" +
+                        std::to_string(i) + "] shape: " + output_shapes[i].to_string());
+        }
+    }
+
+    // 6. Incrementally update shape evaluator when new shapes are inferred
+    // This allows Reshape nodes to get dynamically computed target shapes
+    if (!output_shapes.empty() && output_shapes[0].ndim() > 0) {
+        input_shapes_map[node->id()] = output_shapes[0];
+        // Trigger incremental evaluation for dependent shape tensor nodes
+        shape_evaluator.incremental_evaluate(node->id(), output_shapes[0]);
+
+    }
+
+    // 7. Cache plugin for execution
+    if (node->get_operator()->cached_plugin() == nullptr) {
+        node->get_operator()->set_cached_plugin(std::move(plugin));
+    }
 
     return core::Status::SUCCESS;
 }
@@ -529,7 +549,7 @@ core::Status InferencePlan::update_tensor_properties() {
 
     size_t updated_count = 0;
 
-    for (const auto& node : sorted_nodes_) {
+    for (const auto& node : graph_->get_sorted_nodes()) {
         if (!node) {
             continue;
         }
@@ -599,7 +619,7 @@ core::Status InferencePlan::update_tensor_properties() {
             updated_count++;
 
             if (config_.enable_profiling) {
-                MI_LOG_INFO("[InferencePlan] Tensor '" + node->name() + "' output[" +
+                MI_LOG_DEBUG("[InferencePlan] Tensor '" + node->name() + "' output[" +
                             std::to_string(idx) + "]: shape=" + shape.to_string() +
                             ", dtype=" + std::to_string(static_cast<int>(tensor->dtype())) +
                             ", size=" + std::to_string(size_bytes) + " bytes");
@@ -850,7 +870,7 @@ core::Status InferencePlan::collect_ordered_outputs(ExecutionContext* ctx) const
         }
     }
 
-    for (const auto& node : sorted_nodes_) {
+    for (const auto& node : graph_->get_sorted_nodes()) {
         if (!node) {
             continue;
         }
@@ -905,7 +925,7 @@ core::Status InferencePlan::handle_shape_change(
 
     size_t resized = 0;
     size_t allocated = 0;
-    for (const auto& node : sorted_nodes_) {
+    for (const auto& node : graph_->get_sorted_nodes()) {
         if (!node) {
             continue;
         }
@@ -1033,7 +1053,7 @@ core::Status InferencePlan::preload_weights_to_gpu() {
     size_t weight_count = 0;
 
     // Iterate through all nodes and preload their constant input tensors to GPU
-    for (const auto& node : sorted_nodes_) {
+    for (const auto& node : graph_->get_sorted_nodes()) {
         if (!node) {
             continue;
         }

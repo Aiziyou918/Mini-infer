@@ -591,9 +591,9 @@ int main(int argc, char** argv) {
 
         runtime::EngineConfig config;
         config.device_type = core::DeviceType::CPU;
-        config.enable_profiling = false;
-        config.enable_graph_optimization = false;  // Disable for BERT to avoid issues
-        config.enable_memory_planning = false;
+        config.enable_profiling = true;
+        config.enable_graph_optimization = true;
+        config.enable_memory_planning = true;
 
         // Enable dynamic shapes with a fixed profile to avoid undefined shapes in BERT graphs.
         config.enable_dynamic_shapes = true;

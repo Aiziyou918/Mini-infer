@@ -25,13 +25,9 @@ core::Status ConstantFoldingPass::apply(Graph* graph, int& num_modifications) {
     // Step 1: Collect all initializers into Graph::constants_
     collect_initializers(graph);
 
-    // Step 2: Topological traversal to fold constant subgraphs
-    std::vector<std::shared_ptr<Node>> sorted_nodes;
-    auto status = graph->topological_sort(sorted_nodes);
-    if (status != core::Status::SUCCESS) {
-        MI_LOG_ERROR("[ConstantFolding] Failed to perform topological sort");
-        return status;
-    }
+    // Step 2: Use cached topological sort (TensorRT-style)
+    // This avoids redundant O(V+E) sorting if already done
+    const auto& sorted_nodes = graph->get_sorted_nodes();
 
     std::unordered_set<size_t> nodes_to_delete;
 
@@ -57,7 +53,7 @@ core::Status ConstantFoldingPass::apply(Graph* graph, int& num_modifications) {
 
         // Execute node on CPU to get constant output
         std::vector<std::shared_ptr<core::Tensor>> output_tensors;
-        status = execute_node_on_cpu(node, graph, output_tensors);
+        auto status = execute_node_on_cpu(node, graph, output_tensors);
         if (status != core::Status::SUCCESS) {
             MI_LOG_WARNING("[ConstantFolding] Failed to fold node: " + node->name());
             continue;

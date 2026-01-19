@@ -304,7 +304,7 @@ ExecutionContext::PoolBindResult ExecutionContext::try_bind_tensor_to_pool(
 
         allocated_count++;
         if (plan_->config().enable_profiling) {
-            MI_LOG_INFO("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
+            MI_LOG_DEBUG("[ExecutionContext] Bound tensor for node " + std::to_string(node_id) +
                         " output[" + std::to_string(output_index) + "] to shared buffer offset " +
                         std::to_string(offset) + " (" + std::to_string(required / 1024.0) + " KB)");
         }

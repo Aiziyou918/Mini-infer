@@ -1,10 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "mini_infer/core/op_type.h"
@@ -22,10 +22,14 @@ namespace runtime {
  * following TensorRT's architecture where shape tensors are evaluated
  * symbolically using a shape_values map, not runtime tensor pointers.
  *
- * Key concepts:
- * - Shape tensors: Tensors that represent shapes (e.g., output of Shape op)
- * - Shape values: Logical values (vector<int64_t>), not runtime Tensor objects
- * - Evaluation is based on shape_values availability, not t->data()
+ * Key design principles (TensorRT-style):
+ * - Uses node ID as key (not string) for O(1) lookup
+ * - Stores node OUTPUT values (not inputs)
+ * - Reuses Graph::constants_ from ConstantFoldingPass
+ * - Supports both constant and dynamic shape values
+ *
+ * Typical shape subgraph in BERT/LLM:
+ *   Shape -> Gather -> Unsqueeze -> Concat -> Reshape
  */
 class ShapeTensorEvaluator {
 public:
@@ -56,12 +60,12 @@ public:
     void initialize(const std::shared_ptr<graph::Graph>& graph);
 
     /**
-     * @brief Seed shape values from initializers (constants)
+     * @brief Seed shape values from Graph::constants_ (TensorRT-style)
      *
-     * This populates shape_values_ with values from constant tensors
-     * that are known at build time (e.g., axes, starts, ends for Slice).
+     * Reuses the constant tensors collected by ConstantFoldingPass.
+     * Only integer tensors (INT64/INT32) are considered shape tensors.
      */
-    void seed_from_initializers();
+    void seed_from_graph_constants();
 
     /**
      * @brief Evaluate all shape tensors in topological order
@@ -73,22 +77,19 @@ public:
      * @return Status code
      */
     core::Status evaluate(
-        const std::unordered_map<std::string, core::Shape>& input_shapes);
+        const std::unordered_map<size_t, core::Shape>& input_shapes);
 
     /**
-     * @brief Provide known output shapes for non-input nodes (runtime shape inference)
+     * @brief Incrementally update shape values when a new node shape is inferred
      *
-     * When set, shape evaluation can use these shapes instead of stale output_tensors.
+     * TensorRT-style incremental evaluation: only re-evaluate shape tensor nodes
+     * that depend on the newly inferred shape.
+     *
+     * @param node_id The node whose shape was just inferred
+     * @param shape The newly inferred shape
+     * @return Status code
      */
-    void set_known_output_shapes(
-        const std::vector<std::vector<core::Shape>>* shapes_by_id);
-
-    /**
-     * @brief Get the evaluated shape value for a tensor
-     * @param tensor_name Name of the tensor
-     * @return Pointer to ShapeValue if available, nullptr otherwise
-     */
-    const ShapeValue* get_shape_value(const std::string& tensor_name) const;
+    core::Status incremental_evaluate(size_t node_id, const core::Shape& shape);
 
     /**
      * @brief Get the evaluated shape value by node ID
@@ -98,17 +99,17 @@ public:
     const ShapeValue* get_shape_value(size_t node_id) const;
 
     /**
-     * @brief Check if a tensor is a shape tensor
-     * @param tensor_name Name of the tensor
-     * @return True if the tensor is a shape tensor
+     * @brief Check if a node has a known shape value
+     * @param node_id Node ID
+     * @return True if the node has a valid shape value
      */
-    bool is_shape_tensor(const std::string& tensor_name) const;
+    bool has_shape_value(size_t node_id) const;
 
     /**
-     * @brief Get all evaluated shape values
-     * @return Map of tensor names to shape values
+     * @brief Get all evaluated shape values (by node ID)
+     * @return Vector of shape values indexed by node ID
      */
-    const std::unordered_map<std::string, ShapeValue>& get_all_shape_values() const {
+    const std::vector<ShapeValue>& get_all_shape_values() const {
         return shape_values_;
     }
 
@@ -117,12 +118,12 @@ public:
      */
     void clear();
 
-private:
     /**
-     * @brief Check if a node produces shape tensors
+     * @brief Check if an operator type is shape-related
      */
-    bool is_shape_tensor_op(core::OpType op_type) const;
+    static bool is_shape_tensor_op(core::OpType op_type);
 
+private:
     /**
      * @brief Check if we can evaluate a shape tensor op
      *
@@ -165,28 +166,39 @@ private:
      * @brief Get input shape (not shape value) for a node at given port
      * @param node The node
      * @param port Input port index
+     * @param input_shapes Map of input node IDs to their shapes
      * @return The shape if available
      */
     core::Shape get_input_shape(
         const std::shared_ptr<graph::Node>& node, int port) const;
 
+    /**
+     * @brief Read values from tensor (helper)
+     */
+    std::vector<int64_t> read_tensor_values(
+        const std::shared_ptr<core::Tensor>& tensor) const;
+
+    std::vector<std::vector<size_t>> build_shape_consumers(
+        const std::vector<std::shared_ptr<graph::Node>>& sorted_nodes,
+        size_t capacity) const;
+    int count_unmet_inputs(const std::shared_ptr<graph::Node>& node) const;
+    void seed_ready_queue(const std::vector<std::shared_ptr<graph::Node>>& sorted_nodes,
+                          size_t capacity,
+                          std::vector<int>& pending_inputs,
+                          std::deque<size_t>& ready) const;
+
     std::shared_ptr<graph::Graph> graph_;
-    std::vector<std::shared_ptr<graph::Node>> sorted_nodes_;
 
-    // Shape values map: tensor_name -> evaluated shape value
-    std::unordered_map<std::string, ShapeValue> shape_values_;
-
-    // Shape values by node ID for fast lookup
-    std::vector<ShapeValue> shape_values_by_id_;
+    // Shape values indexed by node ID (TensorRT-style)
+    // Using node ID for O(1) lookup instead of string
+    std::vector<ShapeValue> shape_values_;
 
     // Input shapes from profile
-    std::unordered_map<std::string, core::Shape> input_shapes_;
+    std::unordered_map<size_t, core::Shape> input_shapes_;
 
-    // Optional runtime shape cache (node_id -> output shapes)
-    const std::vector<std::vector<core::Shape>>* known_output_shapes_by_id_{nullptr};
-
-    // Set of shape tensor names (for quick lookup)
-    std::unordered_set<std::string> shape_tensor_names_;
+    // Cached consumers graph for incremental updates
+    // consumers_[node_id] = list of shape tensor nodes that depend on node_id
+    std::vector<std::vector<size_t>> consumers_;
 };
 
 }  // namespace runtime

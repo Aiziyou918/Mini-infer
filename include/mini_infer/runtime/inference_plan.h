@@ -111,7 +111,7 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
     }
 
     const std::vector<std::shared_ptr<graph::Node>>& sorted_nodes() const {
-        return sorted_nodes_;
+        return graph_->get_sorted_nodes();
     }
 
     const std::vector<InputBinding>& input_bindings() const {
@@ -141,7 +141,6 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
     EngineConfig config_;
     std::shared_ptr<graph::Graph> graph_;
     std::unordered_map<std::string, std::shared_ptr<core::Tensor>> weights_;
-    std::vector<std::shared_ptr<graph::Node>> sorted_nodes_;
     MemoryPlan memory_plan_;
     graph::GraphOptimizer::Statistics optimization_stats_;
     std::vector<InputBinding> input_bindings_;
@@ -177,6 +176,24 @@ class InferencePlan : public std::enable_shared_from_this<InferencePlan> {
     core::Status handle_shape_change(
         ExecutionContext* ctx,
         const std::vector<ShapeInferenceEngine::RuntimeInputShape>& runtime_shapes) const;
+
+    // Shape inference helpers
+    void collect_node_inputs(
+        const std::shared_ptr<graph::Node>& node,
+        std::vector<core::Shape>& input_shapes,
+        std::vector<core::DataType>& input_dtypes) const;
+
+    void build_input_tensors_for_inference(
+        const std::shared_ptr<graph::Node>& node,
+        const class ShapeTensorEvaluator& shape_evaluator,
+        const std::vector<core::Shape>& input_shapes,
+        std::vector<std::shared_ptr<core::Tensor>>& input_tensors) const;
+
+    core::Status infer_single_node(
+        const std::shared_ptr<graph::Node>& node,
+        class ShapeTensorEvaluator& shape_evaluator,
+        std::unordered_map<size_t, core::Shape>& input_shapes_map,
+        int& total_inferred);
 };
 
 }  // namespace runtime

@@ -115,8 +115,30 @@ class Graph {
      * topological_sort to guarantee the graph is acyclic while returning the
      * ordering.
      */
-    [[nodiscard]] core::Status checked_topological_sort(
-        std::vector<std::shared_ptr<Node>>& sorted_nodes) const;
+    [[nodiscard]] core::Status checked_topological_sort() const;
+
+    /**
+     * @brief Get cached topologically sorted nodes (TensorRT-style)
+     *
+     * Returns cached result if available, otherwise performs sort and caches.
+     * This avoids redundant O(V+E) sorting across multiple components.
+     *
+     * @return Reference to cached sorted nodes vector
+     */
+    const std::vector<std::shared_ptr<Node>>& get_sorted_nodes();
+
+    /**
+     * @brief Invalidate the cached topological sort
+     *
+     * Call this when the graph structure changes (add/remove nodes/edges).
+     * The next call to get_sorted_nodes() will re-sort.
+     */
+    void invalidate_topology() { topology_valid_ = false; }
+
+    /**
+     * @brief Check if topology cache is valid
+     */
+    bool is_topology_valid() const { return topology_valid_; }
 
     /**
      * @brief Graph-level optimization placeholder.
@@ -199,6 +221,11 @@ class Graph {
     std::unordered_map<std::string, size_t> name_to_id_;
     std::vector<std::string> input_names_;
     std::vector<std::string> output_names_;
+
+    // Topological sort cache (TensorRT-style)
+    // Avoids redundant O(V+E) sorting across multiple components
+    mutable std::vector<std::shared_ptr<Node>> sorted_nodes_cache_;
+    mutable bool topology_valid_{false};
 
     // Constant tensors storage (node_id -> Tensor)
     // Used for constant folding optimization

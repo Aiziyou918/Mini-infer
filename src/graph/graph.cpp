@@ -23,6 +23,10 @@ std::shared_ptr<Node> Graph::create_node(const std::string& name) {
     node->set_id(nodes_.size());
     nodes_.push_back(node);
     name_to_id_[name] = node->id();
+
+    // Invalidate topology cache when graph structure changes
+    invalidate_topology();
+
     return node;
 }
 
@@ -54,11 +58,15 @@ void Graph::add_node(const std::shared_ptr<Node>& node) {
         const size_t id = it->second;
         node->set_id(id);
         nodes_[id] = node;
+        invalidate_topology();
         return;
     }
     node->set_id(nodes_.size());
     nodes_.push_back(node);
     name_to_id_[name] = node->id();
+
+    // Invalidate topology cache when graph structure changes
+    invalidate_topology();
 }
 
 void Graph::remove_node(const std::string& name) {
@@ -88,6 +96,9 @@ void Graph::remove_node(const std::string& name) {
     }
     nodes_[target_id] = nullptr;
     name_to_id_.erase(it);
+
+    // Invalidate topology cache when graph structure changes
+    invalidate_topology();
 }
 
 core::Status Graph::connect(size_t src_id, size_t dst_id, int src_port, int dst_port) {
@@ -116,6 +127,9 @@ core::Status Graph::connect(size_t src_id, size_t dst_id, int src_port, int dst_
 
     src->add_output(dst, src_port, dst_port);
     dst->add_input(src, src_port, dst_port);
+
+    // Invalidate topology cache when graph structure changes
+    invalidate_topology();
 
     return core::Status::SUCCESS;
 }
@@ -243,8 +257,7 @@ core::Status Graph::topological_sort(std::vector<std::shared_ptr<Node>>& sorted_
     return core::Status::SUCCESS;
 }
 
-core::Status Graph::checked_topological_sort(
-    std::vector<std::shared_ptr<Node>>& sorted_nodes) const {
+core::Status Graph::checked_topological_sort() const {
     // 1) Check if the input/output names exist
     for (const auto& name : input_names_) {
         if (name_to_id_.find(name) == name_to_id_.end()) {
@@ -257,8 +270,36 @@ core::Status Graph::checked_topological_sort(
             return core::Status::ERROR_INVALID_ARGUMENT;
         }
     }
-    // 2) Perform topological sorting to ensure DAG property and obtain order
-    return topological_sort(sorted_nodes);
+
+    // 2) Use cached topological sort if available
+    if (topology_valid_) {
+        return core::Status::SUCCESS;
+    }
+
+    // 3) Perform topological sorting and cache the result
+    auto status = topological_sort(sorted_nodes_cache_);
+    if (status == core::Status::SUCCESS) {
+        topology_valid_ = true;
+    }
+    return status;
+}
+
+const std::vector<std::shared_ptr<Node>>& Graph::get_sorted_nodes() {
+    // Return cached result if valid
+    if (topology_valid_) {
+        return sorted_nodes_cache_;
+    }
+
+    // Perform topological sort and cache the result
+    sorted_nodes_cache_.clear();
+    auto status = topological_sort(sorted_nodes_cache_);
+
+    // Mark cache as valid only if sort succeeded
+    if (status == core::Status::SUCCESS) {
+        topology_valid_ = true;
+    }
+
+    return sorted_nodes_cache_;
 }
 
 core::Status Graph::optimize() {
@@ -273,8 +314,7 @@ core::Status Graph::optimize() {
 }
 
 core::Status Graph::validate() const {
-    std::vector<std::shared_ptr<Node>> topo;
-    return checked_topological_sort(topo);
+    return checked_topological_sort();
 }
 
 // ============================================================================
